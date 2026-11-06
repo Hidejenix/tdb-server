@@ -78,3 +78,75 @@ python -I host\carregar_script_no_host.py <PID_do_host> host\ferramentas\dar_din
 - Dois jogadores ainda não se veem com garantia; o login do segundo jogador não foi testado.
 - A replicação é recriada em JavaScript (o exe é build de cliente, sem `ServerReplicateActors`):
   ~40–55 quadros/s com um cliente.
+
+
+----------------------------------------------------------------------------------------------------------------------------
+
+
+Dedicated Server for The Day Before (Native Host)
+
+The official game servers have been shut down. This project transforms a second copy of the game's own TheDayBefore.exe into a server (headless dedicated mode) using Frida scripts, and redirects the game's Firestore database to a local emulator. The client connects via the in-game Server Browser (selecting the SERVIDOR-LOCAL line).
+⚠️ Note: This project does not contain any game files. You must have the game installed. The scripts rely on the memory addresses of this specific executable (UE 5.2.1, Steam emulator build); any other version of the exe will not work.
+
+Structure
+
+
+Folder	Description
+host/servidor_host.py	Single runner: Boots up services, populates the server list, and launches the host with the scripts.
+host/scripts/	Host-side Frida scripts (handling listen mode, dedicated mode, replication, login, and redirects).
+host/ferramentas/	Optional tools: dar_dinheiro.js (grants items to players), and data reading probes.
+host/carregar_script_no_host.py	Injects a tool into an already running host process.
+servicos/	Firestore emulator configuration, IPv6 bridge, TLS terminator, and certificate generator.
+cliente/cliente_conecta.py	Launches the client game with all necessary network redirections.
+
+
+Installation
+
+Perform these steps on the host PC and on each client PC/account:
+1. Have The Day Before installed (default path: C:\Games\THE DAY BEFORE; if using a different folder, set the TDB_JOGO environment variable).
+2. Install Python 3.11+ (make sure to check "Add to PATH").
+3. Install Frida: Run pip install frida frida-tools (tested with Frida 17).
+Host-only requirements:
+4. Install Node.js LTS and the Firebase CLI: Run npm install -g firebase-tools
+5. Install Java 11+ (required to run the Firestore emulator).
+6. Install the certificate package: Run pip install cryptography
+Make sure to close Proxifier (or similar proxy tools), as they will break the connection to the emulator.
+
+Running the Host
+
+Run the following command:
+bash
+python -I host\servidor_host.py --sem-interface
+Use code with caution.
+The script will automatically set up everything: the Firestore emulator (127.0.0.1:8081), the IPv6 bridge ([::1]:8081), the TLS terminator (port 443), local certificates, and the SERVIDOR-LOCAL entry in the server list. It then launches the game completely headless, travels to the map, and starts listening on UDP port 7777.
+Monitor the log file at %TEMP%\servidor_host_headless.out and wait until you see the line LISTEN OK (takes approx. 30–70 seconds).
+• With window: Running without --sem-interface opens the host with a game window; press F8 once you reach the menu.
+• Saves: The Firestore state is exported every 60 seconds to servicos\firestore_emu\emu_data (where character data is saved).
+• Resource Usage: Uses ~1.5 CPU cores and ~10 GB of RAM (since the entire map is loaded into memory).
+
+Running the Client
+
+You must use a different Windows user account (or a separate PC). The game cannot open two instances under the same user because the local Firestore database in %LOCALAPPDATA% gets locked by the first process.
+Run the following command:
+bash
+python cliente\cliente_conecta.py
+Use code with caution.
+Inside the game: Log in → Go to Server Browser → Click Refresh → Select SERVIDOR-LOCAL.
+Each player requires a unique SteamId. Set the TDB_STEAMID and TDB_NOME environment variables before running the client script (defaults are 76561197960287930 / Jogador1). Use the --diag flag to enable diagnostic scripts (note: this will significantly impact performance).
+
+Tools
+
+To grant 50,000 credits to connected player(s) (the exact amount can be adjusted at the top of the script file), run:
+bash
+python -I host\carregar_script_no_host.py <host_PID> host\ferramentas\dar_dinheiro.js
+Use code with caution.
+
+Known Limitations
+
+• Local-only: Currently only tested with both the host and client running on the same PC (127.0.0.1). Playing over a LAN network or a VPS requires modifying the server address in the server list and inside cliente\tdb_fname_join.js.
+• Multiplayer stability: Stable interaction between two separate players is not yet guaranteed; logging in a second simultaneous player is currently untested.
+• Performance: Because network replication is recreated via JavaScript hooks (as the client build lacks native ServerReplicateActors logic), performance sits around ~40–55 FPS with one client connected.
+If you want to customize this further, let me know if you need help with:
+• Translating specific code files or internal script comments.
+• Documenting how to configure the scripts for LAN / VPS networking.
+• Setting up the environment variables automatically via a batch file (.bat).
