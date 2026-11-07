@@ -25,7 +25,7 @@ import frida
 
 DIR = Path(__file__).resolve().parent
 JS = DIR / "tdb_connectex_test.js"
-LOG = DIR / "cliente_frida.log"
+LOG = DIR / ("cliente_frida_%s.log" % (os.environ.get("USERNAME", "") or "cliente").lower())   # um log por conta (2 clientes no mesmo PC)
 JOGO = os.environ.get("TDB_JOGO", r"C:\Games\THE DAY BEFORE")
 WD = os.path.join(JOGO, r"Survival\Binaries\Win64")
 EXE = os.path.join(WD, "TheDayBefore.exe")
@@ -37,8 +37,17 @@ UE_LOGS = Path(os.path.expandvars(r"%LOCALAPPDATA%\Survival\Saved\Logs"))
 # de arquivos na pasta do jogo ao abrir o processo. O host usa outro ID (76561197960271872, ver servidor_host.py).
 # O steam_api64.dll carregado e o da pasta do Engine (force_steamid.txt); o configs.user.ini e gravado junto por seguranca.
 # Cada jogador precisa de um SteamId diferente (o personagem fica em players/<SteamId> no Firestore).
-CLIENTE_STEAM_ID = os.environ.get("TDB_STEAMID", "76561197960287930")
-CLIENTE_NOME = os.environ.get("TDB_NOME", "Jogador1")
+# 06/11: um SteamId por CONTA DO WINDOWS, para dois clientes no mesmo PC (contas diferentes) serem jogadores diferentes.
+# A instalacao do jogo e compartilhada e o emulador Steam le o ID do arquivo ao abrir: abra um cliente, espere ele chegar ao menu
+# e so entao abra o outro. TDB_STEAMID/TDB_NOME continuam valendo para forcar outro ID.
+IDS_POR_CONTA = {
+    "teste": ("76561197960287930", "Jogador1"),   # o personagem que ja existia
+    "yan":   ("76561197960287931", "Jogador2"),
+}
+_conta = os.environ.get("USERNAME", "").lower()
+_id_padrao, _nome_padrao = IDS_POR_CONTA.get(_conta, ("76561197960287930", "Jogador1"))
+CLIENTE_STEAM_ID = os.environ.get("TDB_STEAMID", _id_padrao)
+CLIENTE_NOME = os.environ.get("TDB_NOME", _nome_padrao)
 STEAM_ENGINE = Path(JOGO) / r"Engine\Binaries\ThirdParty\Steamworks\Steamv153\Win64\steam_settings"
 STEAM_CFG = Path(WD) / r"steam_settings\configs.user.ini"
 
@@ -55,6 +64,25 @@ def definir_identidade(steam_id: str, nome: str) -> None:
     except OSError as e:
         atual = (STEAM_ENGINE / "force_steamid.txt").read_text(encoding="ascii", errors="replace")
         print(f"AVISO: nao consegui gravar a identidade ({e}); force_steamid.txt atual = {atual}", flush=True)
+
+
+def limpar_temp_frida(horas: float = 1) -> int:
+    """06/11: o Frida extrai o agente (~61 MB) em %TEMP%\frida-<codigo> a cada abertura e so apaga quando o Python termina limpo;
+    sem isso as pastas acumulam (no host chegaram a 60 GB). Apaga as com mais de `horas`; as em uso falham e ficam."""
+    import tempfile
+    base, n = tempfile.gettempdir(), 0
+    for nome in os.listdir(base):
+        if not nome.startswith("frida-"):
+            continue
+        p = os.path.join(base, nome)
+        try:
+            if time.time() - os.path.getmtime(p) < horas * 3600:
+                continue
+            shutil.rmtree(p)
+            n += 1
+        except Exception:
+            pass
+    return n
 
 
 def on_message(message, data):
@@ -79,13 +107,77 @@ def copy_ue_logs() -> None:
     print(f"log do jogo copiado: {dest}", flush=True)
 
 
+def ponte_firestore(host: str, porta: int = 443) -> bool:
+    """Host remoto (VPS): o tdb_connectex_test.js manda o Firestore do jogo para 127.0.0.1:443 / [::1]:443. Esta ponte, num thread,
+    repassa essas conexoes (bytes crus, o TLS e terminado na VPS) para host:443. Devolve False se a 443 local ja estiver ocupada
+    (por exemplo um terminador TLS local antigo ainda aberto)."""
+    import asyncio, threading
+
+    async def tratar(r, w):
+        try:
+            ur, uw = await asyncio.wait_for(asyncio.open_connection(host, porta), 10)
+        except Exception as e:
+            print(f"ponte: nao conectei em {host}:{porta} ({e})", flush=True); w.close(); return
+
+        async def cano(a, b):
+            try:
+                while True:
+                    d = await a.read(65536)
+                    if not d:
+                        break
+                    b.write(d); await b.drain()
+            except Exception:
+                pass
+            finally:
+                try: b.close()
+                except Exception: pass
+        await asyncio.gather(cano(r, uw), cano(ur, w))
+
+    pronto, ok = threading.Event(), {"v": True}
+
+    def rodar():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            servs = [loop.run_until_complete(asyncio.start_server(tratar, h, porta)) for h in ("127.0.0.1", "::1")]
+        except OSError as e:
+            print(f"ponte: porta {porta} local ocupada ({e}). Feche o terminador TLS local, se houver.", flush=True)
+            ok["v"] = False; pronto.set(); return
+        pronto.set()
+        loop.run_forever()
+
+    threading.Thread(target=rodar, daemon=True).start()
+    pronto.wait(5)
+    if ok["v"]:
+        print(f"ponte do Firestore: 127.0.0.1:{porta} e [::1]:{porta} -> {host}:{porta}", flush=True)
+    return ok["v"]
+
+
 def main() -> int:
     # 06/11: antes o padrao era 900 s; apos 15 min o script soltava o jogo (session.detach) e fechava a janela,
     # e os monitores paravam no meio do jogo. Agora o padrao (0) e ficar ate o jogo fechar; um numero > 0 ainda limita o tempo.
     # 06/11 (modo leve, padrao): so os scripts que mudam o comportamento (redirecionamento do Firestore e do join).
     # Com --diag volta tudo: diagnosticos de UDP/travel/ProcessEvent, monitor do GPS e gRPC em modo debug.
     diag = "--diag" in sys.argv
-    nums = [a for a in sys.argv[1:] if a.isdigit()]
+    # Host remoto: --host <IPv4> (ou variavel TDB_HOST). Sem isso, o host e este PC (127.0.0.1).
+    host = sys.argv[sys.argv.index("--host") + 1] if "--host" in sys.argv else os.environ.get("TDB_HOST", "")
+    # Sem --host/TDB_HOST: usa o IP do arquivo host.txt ao lado deste script (uma linha; apague o arquivo para voltar ao host local).
+    if not host and (DIR / "host.txt").exists():
+        host = (DIR / "host.txt").read_text(encoding="utf-8").strip()
+        if host:
+            print(f"host lido de host.txt: {host}", flush=True)
+    if host:
+        print(f"host remoto: {host} (join para {host}:7777, Firestore pela ponte)", flush=True)
+        if not ponte_firestore(host):
+            # Dois clientes no mesmo PC: a ponte do primeiro (em 127.0.0.1:443) serve aos dois, de qualquer conta. Se a 443 ja
+            # responde, seguimos usando ela. Atencao: se o cliente que abriu a ponte fechar, o outro perde o Firestore.
+            import socket
+            try:
+                socket.create_connection(("127.0.0.1", 443), 2).close()
+                print("porta 443 local ja tem uma ponte (de outro cliente aberto): usando ela. Nao feche o primeiro cliente.", flush=True)
+            except OSError:
+                return 1
+    nums = [a for a in sys.argv[1:] if a.isdigit() and a != host]
     seconds = int(nums[0]) if nums else 0
     env = dict(os.environ)
     if diag:   # gRPC em modo debug (conexao com o Firestore): muito texto no stdout, custa desempenho
@@ -93,6 +185,9 @@ def main() -> int:
         env["GRPC_TRACE"] = "tsi,ssl_transport_security,tcp,client_channel"
     print("modo: " + ("DIAGNOSTICO (--diag)" if diag else "LEVE (sem monitores; use --diag para liga-los)"), flush=True)
     definir_identidade(CLIENTE_STEAM_ID, CLIENTE_NOME)
+    n_lixo = limpar_temp_frida()
+    if n_lixo:
+        print(f"limpeza: {n_lixo} pastas antigas do Frida apagadas do TEMP", flush=True)
     device = frida.get_local_device()
     print("abrindo o jogo como cliente...", flush=True)
     pid = device.spawn(
@@ -107,6 +202,8 @@ def main() -> int:
     if diag:
         partes += [DIAG / "tdb_join_udp.js", DIAG / "tdb_travel_log.js", DIAG / "tdb_pe_travel.js"]
     source = "\n".join(p.read_text(encoding="utf-8") for p in partes)
+    if host:
+        source = "var TDB_HOST = %r;\n" % host + source
     script = session.create_script(source)
     script.on("message", on_message)
     script.load()

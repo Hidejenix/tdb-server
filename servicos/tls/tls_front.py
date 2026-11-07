@@ -6,6 +6,7 @@ Uso: python tls_front.py
 from __future__ import annotations
 
 import asyncio
+import os
 import ssl
 from pathlib import Path
 
@@ -73,11 +74,14 @@ async def main() -> None:
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     ctx.load_cert_chain(certfile=str(DIR / "firestore.pem"), keyfile=str(DIR / "firestore.key"))
     ctx.set_alpn_protocols(["h2"])
+    # TDB_TLS_HOST: endereco IPv4 de escuta. Padrao 127.0.0.1 (host e cliente no mesmo PC); na VPS use 0.0.0.0 para os clientes
+    # de fora entrarem (porta 443 liberada no firewall, de preferencia so para o IP dos jogadores). [::1] fica sempre, para o host local.
+    host4 = os.environ.get("TDB_TLS_HOST", "127.0.0.1")
     servers = [
-        await asyncio.start_server(handle, "127.0.0.1", 443, ssl=ctx),
+        await asyncio.start_server(handle, host4, 443, ssl=ctx),
         await asyncio.start_server(handle, "::1", 443, ssl=ctx),
     ]
-    print(f"tls_front ouvindo em 127.0.0.1:443 e [::1]:443 -> {UPSTREAM[0]}:{UPSTREAM[1]}", flush=True)
+    print(f"tls_front ouvindo em {host4}:443 e [::1]:443 -> {UPSTREAM[0]}:{UPSTREAM[1]}", flush=True)
     await asyncio.gather(*(s.serve_forever() for s in servers))
 
 

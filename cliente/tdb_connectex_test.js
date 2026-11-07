@@ -27,8 +27,10 @@ const SET_VERIFY = main.base.add(0x58ad710); // SSL_CTX_set_verify (fork1: chama
 const LOCAL4 = [127, 0, 0, 1];
 const LOCAL6 = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1];
 const GOOGLE4 = [[172, 217], [142, 250], [142, 251], [216, 58], [74, 125], [172, 253]];
-// Prefixos IPv6 do Google: 2800:3f0::/32, 2001:4860::/32, 2404:6800::/32, 2a00:1450::/32
-const GOOGLE6 = [[0x28, 0x00, 0x03, 0xf0], [0x20, 0x01, 0x48, 0x60], [0x24, 0x04, 0x68, 0x00], [0x2a, 0x00, 0x14, 0x50]];
+// Prefixos IPv6 do Google: 2800:3f0::/32, 2001:4860::/32, 2404:6800::/32, 2a00:1450::/32, 2607:f8b0::/32
+// (2607:f8b0 = America do Norte; sugerido no PR #1 do GitHub, onde o Firestore resolve para esse bloco)
+const GOOGLE6 = [[0x28, 0x00, 0x03, 0xf0], [0x20, 0x01, 0x48, 0x60], [0x24, 0x04, 0x68, 0x00], [0x2a, 0x00, 0x14, 0x50],
+                 [0x26, 0x07, 0xf8, 0xb0]];
 
 function isGoogle4(ip) {
   return GOOGLE4.some(function (p) { return ip[0] === p[0] && ip[1] === p[1]; });
@@ -95,7 +97,9 @@ function objectName(obj) {
 
 // 06/11 (modo leve): o hook em ProcessEvent decodificava o nome de TODA UFunction chamada pelo jogo, para sempre.
 // Agora ele se solta (detach) assim que liga o redirecionamento: depois disso nao ha mais nada para ele fazer.
-const peListener = Interceptor.attach(processEvent, {
+// 06/11 (noite): com redirectOn ja true desde o inicio (Teste 1), o hook nunca chegava ao detach e ficava ligado para sempre
+// (retornando cedo em toda chamada do ProcessEvent). Agora so e instalado se o redirecionamento comecar desligado.
+const peListener = redirectOn ? null : Interceptor.attach(processEvent, {
   onEnter(args) {
     if (redirectOn) return;
     if (objectName(args[1]) === 'PrepareServerList') {

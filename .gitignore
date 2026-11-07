@@ -1,0 +1,14 @@
+# chaves e certificados gerados localmente (make_local_ca.py) - NAO publicar
+servicos/tls/*.key
+servicos/tls/*.pem
+servicos/tls/capturas/
+# dados do emulador do Firestore (personagens, saves)
+servicos/firestore_emu/emu_data*/
+servicos/firestore_emu/*.log
+# configuracao da VPS (IP publico) gerada pelo linux/subir_tudo.sh
+linux/vps.conf
+# logs
+*.log
+logs/
+__pycache__/
+*linux/

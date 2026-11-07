@@ -1,6 +1,7 @@
 """Servidor proprio com host nativo (The Day Before): runner unico. Ver README.md na raiz do repositorio.
-Uso:  python -I servidor_host.py --sem-interface        (recomendado: sem janela, F8 automatico, modo leve)
-      python -I servidor_host.py                        (com janela: apertar F8 no host depois do menu)
+Uso:  python -I servidor_host.py                 (padrao: sem janela, F8 automatico, modo leve)
+      python -I servidor_host.py --com-janela    (com janela: apertar F8 no host depois do menu; continua leve)
+      python -I servidor_host.py --diag          (sem o modo leve: monitores e diagnosticos ligados, mais lento)
   1. Sobe os servicos que estiverem parados: emulador do Firestore (8081), ponte IPv6 ([::1]:8081), terminador TLS (443);
      cria os certificados locais e o servidor "SERVIDOR-LOCAL" na lista, se faltarem.
   2. Confere a porta UDP do listen (7777).
@@ -23,13 +24,24 @@ TMP = os.environ["TEMP"]
 #   --sem-interface : host sem janela/placa de video (-nullrhi -nosound) e F8 automatico (auto_f8.js)
 #   --porta N       : porta UDP do listen (padrao 7777). Outra porta serve para testar sem derrubar o host atual
 #                     (a lista de servidores aponta para 7777, entao o cliente so entra pela 7777).
-SEM_INTERFACE = "--sem-interface" in sys.argv
+# Padrao: SEM INTERFACE e MODO LEVE (o recomendado). --com-janela abre o jogo com janela (apertar F8 depois do menu);
+# --diag desliga o modo leve (mantem monitores/diagnosticos dos scripts, mais lento). --sem-interface fica aceito (era o antigo).
+SEM_INTERFACE = "--com-janela" not in sys.argv
+LEVE = "--diag" not in sys.argv
 PORTA = int(sys.argv[sys.argv.index("--porta") + 1]) if "--porta" in sys.argv else 7777
 OUT = os.path.join(TMP, "servidor_host%s%s.out" % ("_headless" if SEM_INTERFACE else "", "" if PORTA == 7777 else "_%d" % PORTA))
 # tdb_connectex_test.js (copia do cliente) vem DEPOIS do ssl_unpin.js: o ssl_unpin desvia antes os IPs de autenticacao
 # para 127.0.0.1:8080; o resto do Google:443 (Firestore gRPC) vai para o terminador TLS -> emulador, desde a abertura.
 SCRIPTS = ["ssl_unpin.js", "tdb_connectex_test.js", "fake_server_join.js", "host_flow_servidor.js",
            "modo_dedicado.js", "listen_nativo.js", "replicacao.js", "replicacao_donos.js", "replicacao_distancia.js", "disparar_onserverload.js"]
+# monitor_bugs.js (06/11): vigia itens sumindo e tiro em zumbi fantasma; filtro em C (CModule), barato. --sem-monitores desliga.
+if "--sem-monitores" not in sys.argv:
+    SCRIPTS.append("monitor_bugs.js")
+    SCRIPTS.append("monitor_ping.js")   # ping de cada jogador a cada 15 s (APlayerState.CompressedPing x4)
+    SCRIPTS.append("monitor_posicao.js")   # posicao do pawn de cada jogador no servidor (teleporte, queda, troca de pawn)
+# resgate_queda.js (06/11): unstuck automatico (6 s caindo ou abaixo do mapa) e manual (linux/unstuck.sh). --sem-resgate desliga.
+if "--sem-resgate" not in sys.argv:
+    SCRIPTS.append("resgate_queda.js")
 # LocalAppData proprio (06/11): na porta de teste (ou com --appdata-separado) a instancia usa outra pasta LocalAppData, porque o banco
 # local do Firestore (LevelDB com LOCK) em %LOCALAPPDATA%\firestore so abre em um processo por usuario (a 2a instancia caia).
 APPDATA_SEPARADO = ("--appdata-separado" in sys.argv) or PORTA != 7777
@@ -45,7 +57,8 @@ EMU = os.path.join(SERVICOS, "firestore_emu")
 EXPORT_A_CADA = 60   # segundos
 MARCOS = ("LISTEN OK", "ABORTADO", "ERRO", "DESLIGADO", "NetMode", "canal aberto: Pawn", "chamando OnServerLoad",
           "LoginCompleted", "PHASE", "placeholder de cliente visto", "SurvivalPlayer_V2_C", "InitPlayer", "OnError", "erro",
-          "SteamId", "Firestore", "ConnectEx IPv")
+          "SteamId", "Firestore", "ConnectEx IPv", "ITEM SUMIU", "TIRO EM ZUMBI LONGE", "[ping]", "alvos vigiados", "canal FECHADO",
+          "TELEPORTE", "TROCOU PAWN", "SEM PAWN", "classe preservada", "RESGATE", "pedido manual")
 
 # Identidade Steam (emulador Goldberg): host e cliente usam a mesma instalacao, e o emulador le o ID ao abrir o processo
 # (force_steamid.txt da pasta do Engine, onde esta o steam_api64.dll carregado; configs.user.ini gravado junto).
@@ -61,11 +74,29 @@ def log(s, tela=True):
     fh.write(line + "\n"); fh.flush()
     if tela: print(line, flush=True)
 
+# --sem-servicos (Linux/Wine): os servicos (Firestore, TLS, ponte) rodam nativos no Linux (linux/iniciar_servicos.sh) e exportam o
+# Firestore por conta propria; aqui so se abre o jogo com os scripts. No Wine nao ha PowerShell: ps() devolve vazio.
+SEM_SERVICOS = "--sem-servicos" in sys.argv
+
 def ps(cmd):
-    return subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", cmd], capture_output=True, text=True).stdout.strip()
+    if SEM_SERVICOS:
+        return ""
+    try:
+        return subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", cmd], capture_output=True, text=True).stdout.strip()
+    except Exception:
+        return ""
 
 def escutando_tcp(porta, endereco):
-    return bool(ps("Get-NetTCPConnection -State Listen -LocalPort %d -ErrorAction SilentlyContinue | Where-Object LocalAddress -eq '%s'" % (porta, endereco)))
+    """Ve se ha algo escutando conectando na porta (funciona no Windows, no Wine e no Linux)."""
+    fam = socket.AF_INET6 if ":" in endereco else socket.AF_INET
+    s = socket.socket(fam, socket.SOCK_STREAM)
+    s.settimeout(1.5)
+    try:
+        s.connect((endereco, porta)); return True
+    except Exception:
+        return False
+    finally:
+        s.close()
 
 def iniciar(args, cwd, nome):
     err = open(os.path.join(TMP, nome + ".err"), "w")
@@ -112,49 +143,87 @@ def esperar(cond, seg, nome):
         time.sleep(1)
     log("FALHOU: " + nome); return False
 
+# IP que os clientes usam para entrar (Linux/VPS: o IP publico). Variavel TDB_IP_PUBLICO; padrao 127.0.0.1 (mesmo PC).
+IP_PUBLICO = os.environ.get("TDB_IP_PUBLICO", "127.0.0.1")
 LISTA_URL = ("http://127.0.0.1:8081/v1/projects/the-day-before-8f438/databases/(default)/documents/"
-             "server-list/us-central/versions/3/servers/127.0.0.1:%d" % PORTA)
+             "server-list/us-central/versions/3/servers/%s:%d" % (IP_PUBLICO, PORTA))
+# O jogo usa o NOME do documento (ip:porta) como endereco do join (medido 06/11 18:04: com o doc '127.0.0.1:7777' o cliente
+# mandava o join para o proprio PC mesmo com o host na VPS). Nome exibido: TDB_NOME_SERVIDOR (padrao SERVIDOR-LOCAL).
+NOME_SERVIDOR = os.environ.get("TDB_NOME_SERVIDOR", "SERVIDOR-LOCAL")
 
 def criar_servidor_na_lista():
     """Cria/atualiza o documento que o Server Browser do jogo le (server-list/us-central/versions/3/servers)."""
-    campos = {"Players": {"integerValue": "10"}, "Adress": {"stringValue": "127.0.0.1"}, "Port": {"integerValue": str(PORTA)},
-              "Region": {"stringValue": "us-central"}, "ServerName": {"stringValue": "SERVIDOR-LOCAL"},
-              "Name": {"stringValue": "SERVIDOR-LOCAL"}, "DisplayName": {"stringValue": "SERVIDOR-LOCAL"}}
+    campos = {"Players": {"integerValue": "10"}, "Adress": {"stringValue": IP_PUBLICO}, "Port": {"integerValue": str(PORTA)},
+              "Region": {"stringValue": "us-central"}, "ServerName": {"stringValue": NOME_SERVIDOR},
+              "Name": {"stringValue": NOME_SERVIDOR}, "DisplayName": {"stringValue": NOME_SERVIDOR}}
     req = urllib.request.Request(LISTA_URL, data=json.dumps({"fields": campos}).encode(), method="PATCH",
                                  headers={"Content-Type": "application/json"})
     urllib.request.urlopen(req, timeout=10).read()
+    if IP_PUBLICO != "127.0.0.1":   # tira o servidor local antigo da lista (senao aparecem dois e o local leva o join ao PC)
+        try:
+            urllib.request.urlopen(urllib.request.Request(LISTA_URL.rsplit("/", 1)[0] + "/127.0.0.1:%d" % PORTA, method="DELETE"), timeout=10).read()
+        except Exception:
+            pass
 
+
+def limpar_temp_frida(horas=1):
+    """06/11: o Frida extrai o agente (~61 MB) em %TEMP%\frida-<codigo> a cada conexao e so apaga quando o Python termina de forma
+    limpa; com processos encerrados a forca juntou 1460 pastas (60 GB). Apaga as com mais de `horas`; as em uso (DLL carregada) falham e ficam."""
+    import tempfile
+    base, n = tempfile.gettempdir(), 0
+    for nome in os.listdir(base):
+        if not nome.startswith("frida-"):
+            continue
+        p = os.path.join(base, nome)
+        try:
+            if time.time() - os.path.getmtime(p) < horas * 3600:
+                continue
+            shutil.rmtree(p)
+            n += 1
+        except Exception:
+            pass
+    return n
 # ---- 0. pre-requisitos ----
+_n = limpar_temp_frida()
+if _n: log("limpeza: %d pastas antigas do Frida apagadas do TEMP" % _n)
 if not os.path.exists(EXE):
     log("ABORTADO: jogo nao encontrado em " + EXE + " (defina a variavel TDB_JOGO com a pasta do jogo)"); sys.exit(1)
 if ps("Get-Process | Where-Object ProcessName -match proxifier"):
     log("ABORTADO: Proxifier aberto (interfere no Firestore)"); sys.exit(1)
 TLS = os.path.join(SERVICOS, "tls")
-if not os.path.exists(os.path.join(TLS, "firestore.pem")):
+if not SEM_SERVICOS and not os.path.exists(os.path.join(TLS, "firestore.pem")):
     log("certificados locais ausentes: gerando (servicos\\tls\\make_local_ca.py)")
     subprocess.run([PY, "-I", os.path.join(TLS, "make_local_ca.py")], cwd=TLS, check=True)
 if ps("Get-Process -Name TheDayBefore -ErrorAction SilentlyContinue"):
     log("aviso: ja existe TheDayBefore aberto (cliente ou host antigo). O host novo sera outro processo.")
 
 # ---- 1. servicos da lista ----
-if not escutando_tcp(8081, "127.0.0.1"):
+if SEM_SERVICOS:
+    for porta, nome_s in ((8081, "Firestore 127.0.0.1:8081"), (443, "terminador TLS 127.0.0.1:443")):
+        if not esperar(lambda porta=porta: escutando_tcp(porta, "127.0.0.1"), 60, nome_s + " (iniciado fora, pelo linux/iniciar_servicos.sh)"):
+            log("ABORTADO: suba os servicos antes (linux/iniciar_servicos.sh)"); sys.exit(1)
+elif not escutando_tcp(8081, "127.0.0.1"):
     importar = "--import ./emu_data " if os.path.isdir(os.path.join(EMU, "emu_data")) else ""
     iniciar(["cmd.exe", "/c", "firebase emulators:start --only firestore --project the-day-before-8f438 " + importar + "--export-on-exit ./emu_data"], EMU, "firestore_emu")
     if not esperar(lambda: escutando_tcp(8081, "127.0.0.1"), 90, "Firestore em 127.0.0.1:8081"): sys.exit(1)
 else:
     log("ok: Firestore ja em 127.0.0.1:8081")
-if not escutando_tcp(8081, "::1"):
+if SEM_SERVICOS:
+    pass
+elif not escutando_tcp(8081, "::1"):
     iniciar([PY, "-I", os.path.join(SERVICOS, "ipv6_bridge.py")], SERVICOS, "ipv6_bridge")
     esperar(lambda: escutando_tcp(8081, "::1"), 15, "ponte IPv6 [::1]:8081")
 else:
     log("ok: ponte IPv6 ja em [::1]:8081")
-if not escutando_tcp(443, "127.0.0.1"):
+if SEM_SERVICOS:
+    pass
+elif not escutando_tcp(443, "127.0.0.1"):
     iniciar([PY, os.path.join(TLS, "tls_front.py")], TLS, "tls_front")
     esperar(lambda: escutando_tcp(443, "127.0.0.1"), 15, "terminador TLS 127.0.0.1:443")
 else:
     log("ok: terminador TLS ja em 443")
 try:
-    criar_servidor_na_lista(); log("ok: SERVIDOR-LOCAL (127.0.0.1:%d) na lista de servidores" % PORTA)
+    criar_servidor_na_lista(); log("ok: SERVIDOR-LOCAL (%s:%d) na lista de servidores" % (IP_PUBLICO, PORTA))
 except Exception as e:
     log("AVISO: nao consegui gravar o servidor na lista (%s)" % e)
 
@@ -181,8 +250,8 @@ for nome in SCRIPTS:
     if nome == "appdata_separado.js":
         os.makedirs(APPDATA_DIR, exist_ok=True)
         src = "var APPDATA_DIR = %s;\n" % json.dumps(APPDATA_DIR) + src
-    if SEM_INTERFACE and nome in ("host_flow_servidor.js", "modo_dedicado.js", "listen_nativo.js"):
-        src = "var HOST_LEVE = true;  // injetado pelo servidor_host.py --sem-interface\n" + src
+    if LEVE and nome in ("host_flow_servidor.js", "modo_dedicado.js", "listen_nativo.js"):   # padrao, com ou sem janela
+        src = "var HOST_LEVE = true;  // injetado pelo servidor_host.py (modo leve; --diag desliga)\n" + src
     if nome == "listen_nativo.js" and PORTA != 7777:
         if "const PORTA = 7777;" not in src: log("ABORTADO: listen_nativo.js sem 'const PORTA = 7777;'"); sys.exit(1)
         src = src.replace("const PORTA = 7777;", "const PORTA = %d;" % PORTA)
@@ -190,7 +259,8 @@ for nome in SCRIPTS:
 definir_identidade(HOST_STEAM_ID, HOST_NOME)
 dev = frida.get_local_device()
 janela = ["-nullrhi", "-nosound"] if SEM_INTERFACE else ["-windowed", "-ResX=1280", "-ResY=720"]
-log("modo: %s, porta %d, log %s" % ("SEM INTERFACE (-nullrhi -nosound, F8 automatico)" if SEM_INTERFACE else "com janela", PORTA, OUT))
+log("modo: %s, %s, porta %d, log %s" % ("SEM INTERFACE (-nullrhi -nosound, F8 automatico)" if SEM_INTERFACE else "com janela (apertar F8)",
+                                        "LEVE" if LEVE else "DIAGNOSTICO (--diag)", PORTA, OUT))
 env_jogo = None
 if APPDATA_SEPARADO:
     env_jogo = dict(os.environ); env_jogo["LOCALAPPDATA"] = APPDATA_DIR
@@ -223,7 +293,7 @@ def laco_export():
             if not vivo["v"]: return
             time.sleep(1)
         exportar("periodico")
-EXPORTA = (PORTA == 7777)   # porta de teste: outro runner (o host da 7777) ja exporta; dois exports juntos brigam pelo emu_data
+EXPORTA = (PORTA == 7777) and not SEM_SERVICOS   # no Linux quem exporta e o linux/iniciar_servicos.sh; porta de teste: outro runner (o host da 7777) ja exporta; dois exports juntos brigam pelo emu_data
 if EXPORTA:
     threading.Thread(target=laco_export, daemon=True).start()
     log("export do Firestore a cada %d s e ao sair" % EXPORT_A_CADA)

@@ -17,7 +17,14 @@ const main = Process.getModuleByName('TheDayBefore.exe');
 const fnamePool = main.base.add(0x7c27980);
 const processEvent = main.base.add(0x24077b0);
 const OLD = '46.148.232.119';
-const NEW = '127.0.0.1:7777';
+// Destino do join. Padrao: host no mesmo PC. Host remoto (VPS): o cliente_conecta.py injeta `var TDB_HOST = '<ip>';` antes deste
+// script. O texto novo e gravado POR CIMA do FName antigo, entao nao pode passar de 14 caracteres (o tamanho de '46.148.232.119'):
+// um IPv4 sozinho cabe (a porta padrao 7777 e usada); 'ip:porta' so cabe se o IP for curto.
+let NEW = '127.0.0.1:7777';
+if (typeof TDB_HOST !== 'undefined' && TDB_HOST) {
+  if (TDB_HOST.length <= OLD.length) NEW = TDB_HOST;
+  else flog('AVISO: host "' + TDB_HOST + '" tem mais de ' + OLD.length + ' caracteres; usando ' + NEW);
+}
 let done = false;
 
 function asciiBytes(s) {

@@ -38,7 +38,7 @@ Feche o **Proxifier** (ou proxies parecidos): ele quebra a conexão com o emulad
 ## Rodar o host
 
 ```bash
-python -I host\servidor_host.py --sem-interface
+python -I host\servidor_host.py
 ```
 
 Ele sobe sozinho: emulador do Firestore (127.0.0.1:8081), ponte IPv6 ([::1]:8081), terminador TLS
@@ -46,9 +46,52 @@ Ele sobe sozinho: emulador do Firestore (127.0.0.1:8081), ponte IPv6 ([::1]:8081
 faz o travel para o mapa e abre o listen na UDP 7777. Espere no log
 `%TEMP%\servidor_host_headless.out` a linha `LISTEN OK` (≈ 30–70 s).
 
-- Sem `--sem-interface` o host abre com janela; aperte **F8** depois do menu.
+- Padrão: sem janela e em **modo leve** (monitores de diagnóstico desligados; ~40–55 quadros/s com um cliente).
+- `--com-janela`: abre com janela; aperte **F8** depois do menu (continua leve).
+- `--diag`: desliga o modo leve (mais lento; só para investigar).
+- Monitor de bugs ligado por padrão (`host\scripts\monitor_bugs.js`, filtro nativo, barato): no log aparecem `ITEM SUMIU?` (item que saiu de inventário+baú e não voltou em 20 s; venda/uso também aparecem) e `TIRO EM ZUMBI LONGE` (o cliente acertou uma cópia velha de zumbi). `--sem-monitores` desliga.
+  Também sobem `monitor_ping.js` (`[ping]` de cada jogador a cada 15 s) e `monitor_posicao.js` (`[pos]`: posição no servidor; marca `TELEPORTE`, `CAINDO`, `TROCOU PAWN`).
+- **Resgate de queda** ligado por padrão (`host\scripts\resgate_queda.js`): quem cai por 6 s seguidos (ou passa de 1.500 m abaixo do zero)
+  é teleportado para o último lugar onde estava pisando, com a velocidade zerada (sem dano de queda); sem lugar seguro, vai para um ponto
+  de spawn de Woodberry. No log: `RESGATE`. `--sem-resgate` desliga. Unstuck manual: veja **Ferramentas**.
 - O Firestore é exportado a cada 60 s para `servicos\firestore_emu\emu_data` (personagens salvos).
 - Uso medido: ~1,5 núcleo de CPU e **~10 GB de RAM** (o mapa inteiro fica carregado).
+
+## Host numa VPS Linux (Wine)
+
+Testado em Ubuntu 24.04 (Azure, 4 vCPUs, 16 GB). O jogo e o Frida de Windows rodam dentro do Wine; o Firestore e o terminador TLS
+rodam nativos no Linux.
+
+1. Copie esta pasta para a VPS (ex.: `~/tdb/servidor`) e a pasta do jogo para `~/tdb/jogo` (o mesmo build do PC).
+2. Instale tudo (Wine, Xvfb, Java, Node + firebase-tools, swap de 8 GB, Python 3.11 + Frida de Windows dentro do Wine):
+   ```bash
+   bash linux/instalar_vps.sh
+   ```
+3. Libere no firewall da VPS (ex.: NSG da Azure) a entrada **UDP 7777** e **TCP 443**, de preferência só para o IP dos jogadores
+   (o emulador do Firestore aceita leitura e escrita de qualquer um).
+4. Suba tudo com **um comando** (serviços + host; espera o `LISTEN OK`; pode rodar de novo, o que já estiver no ar é mantido):
+   ```bash
+   bash linux/subir_tudo.sh
+   ```
+   - O IP público é conferido a cada subida e guardado em `linux/vps.conf` (junto com `TDB_NOME_SERVIDOR`). Se a Azure trocar o IP
+     depois de desalocar a VM, aparece um AVISO: ponha o IP novo no `host.txt` dos clientes.
+   - Para **parar e salvar** (host, export final do Firestore, emulador e TLS) antes de desligar a VM:
+     ```bash
+     bash linux/derrubar_tudo.sh
+     ```
+     Depois use **Parar** no portal da Azure (desaloca e para a cobrança de CPU; o `shutdown` de dentro da VM não desaloca).
+   - Opcional: **subir sozinho ao ligar a VM** e salvar ao desligar (serviço do systemd `tdb-servidor`):
+     ```bash
+     bash linux/instalar_inicio_automatico.sh          # --remover desfaz
+     ```
+   - Peças avulsas, se precisar: `bash linux/iniciar_servicos.sh &` e `TDB_IP_PUBLICO=<ip> bash linux/iniciar_host.sh`.
+5. No PC do jogador: `python cliente\cliente_conecta.py --host <ip-da-vps>` (ou ponha o IP num arquivo `cliente\host.txt` e rode sem opção) (o IP precisa ter até 14 caracteres; o cliente abre
+   uma ponte local na 443 que leva o Firestore até a VPS — feche qualquer terminador TLS local antes).
+6. **Obrigatório nos dois lados (host e cada cliente):** crie o arquivo vazio
+   `Engine\Binaries\ThirdParty\Steamworks\Steamv153\Win64\steam_settings\disable_lan_only.txt` na pasta do jogo. Sem ele o emulador de
+   Steam (steam_api64.dll) bloqueia em silêncio todo tráfego do jogo para IPs fora da rede local (o join dá "erro de conexão").
+7. O Server Browser usa o **nome do documento** da lista (`servers/<ip>:<porta>`) como endereço; o runner cria o documento com
+   `TDB_IP_PUBLICO` (nome exibido em `TDB_NOME_SERVIDOR`).
 
 ## Rodar o cliente
 
@@ -71,90 +114,21 @@ Dar 50.000 de dinheiro ao(s) jogador(es) conectado(s) (o valor fica no topo do s
 python -I host\carregar_script_no_host.py <PID_do_host> host\ferramentas\dar_dinheiro.js
 ```
 
+Na VPS: `bash linux/carregar_ferramenta.sh host/ferramentas/dar_dinheiro.js`.
+
+**Unstuck manual** (jogador preso ou caindo): teleporta para o último lugar seguro, ou para Woodberry.
+
+```bash
+bash linux/unstuck.sh          # todos
+bash linux/unstuck.sh 8617     # só quem tem "8617" no nome (nomes nas linhas [ping] do log)
+```
+
+No host Windows, o mesmo pedido é uma linha no arquivo `%TEMP%\tdb_host_cmd\unstuck.txt` com um número novo e o nome:
+`Set-Content "$env:TEMP\tdb_host_cmd\unstuck.txt" "$(Get-Date -UFormat %s) todos"`.
+
 ## Limitações conhecidas
 
-- Só testado com o host e o cliente no mesmo PC (127.0.0.1). Para rede/VPS é preciso trocar o endereço
-  do servidor na lista e no `cliente\tdb_fname_join.js`.
-- Dois jogadores ainda não se veem com garantia; o login do segundo jogador não foi testado.
 - A replicação é recriada em JavaScript (o exe é build de cliente, sem `ServerReplicateActors`):
-  ~40–55 quadros/s com um cliente.
-
-
-----------------------------------------------------------------------------------------------------------------------------
-
-# Dedicated Server for The Day Before (Native Host)
-
-The official game servers have been shut down. This project transforms a second copy of the game's own `TheDayBefore.exe` into a server (headless dedicated mode) using **Frida** scripts, and redirects the game's Firestore database to a **local emulator**. The client connects via the in-game Server Browser (selecting the **SERVIDOR-LOCAL** line).
-
-> ⚠️ **Note:** This project does not contain any game files. You must have the game installed. The scripts rely on the memory addresses of this specific executable (UE 5.2.1, Steam emulator build); any other version of the exe will not work.
-
-## Structure
-
-| Folder | Description |
-|---|---|
-| `host/servidor_host.py` | Single runner: Boots up services, populates the server list, and launches the host with the scripts. |
-| `host/scripts/` | Host-side Frida scripts (handling listen mode, dedicated mode, replication, login, and redirects). |
-| `host/ferramentas/` | Optional tools: `dar_dinheiro.js` (grants items to players), and data reading probes. |
-| `host/carregar_script_no_host.py` | Injects a tool into an already running host process. |
-| `servicos/` | Firestore emulator configuration, IPv6 bridge, TLS terminator, and certificate generator. |
-| `cliente/cliente_conecta.py` | Launches the client game with all necessary network redirections. |
-
-## Installation
-
-Perform these steps on the host PC **and** on each client PC/account:
-
-1. Have **The Day Before** installed (default path: `C:\Games\THE DAY BEFORE`; if using a different folder, set the `TDB_JOGO` environment variable).
-2. Install **Python 3.11+** (make sure to check "Add to PATH").
-3. Install **Frida**: Run `pip install frida frida-tools` (tested with Frida 17).
-
-**Host-only requirements:**
-4. Install **Node.js LTS** and the **Firebase CLI**: Run `npm install -g firebase-tools`
-5. Install **Java 11+** (required to run the Firestore emulator).
-6. Install the certificate package: Run `pip install cryptography`
-
-*Make sure to close **Proxifier** (or similar proxy tools), as they will break the connection to the emulator.*
-
-## Running the Host
-
-Run the following command:
-
-```bash
-python -I host\servidor_host.py --sem-interface
-```
-
-The script will automatically set up everything: the Firestore emulator (`127.0.0.1:8081`), the IPv6 bridge (`[::1]:8081`), the TLS terminator (port `443`), local certificates, and the `SERVIDOR-LOCAL` entry in the server list. It then launches the game completely headless, travels to the map, and starts listening on UDP port `7777`.
-
-Monitor the log file at `%TEMP%\servidor_host_headless.out` and wait until you see the line **`LISTEN OK`** (takes approx. 30–70 seconds).
-
-* **With window:** Running without `--sem-interface` opens the host with a game window; press **F8** once you reach the menu.
-* **Saves:** The Firestore state is exported every 60 seconds to `servicos\firestore_emu\emu_data` (where character data is saved).
-* **Resource Usage:** Uses ~1.5 CPU cores and **~10 GB of RAM** (since the entire map is loaded into memory).
-
-## Running the Client
-
-You must use **a different Windows user account** (or a separate PC). The game cannot open two instances under the same user because the local Firestore database in `%LOCALAPPDATA%` gets locked by the first process.
-
-Run the following command:
-
-```bash
-python cliente\cliente_conecta.py
-```
-
-Inside the game: Log in → Go to Server Browser → Click **Refresh** → Select **SERVIDOR-LOCAL**.
-
-Each player requires a unique SteamId. Set the `TDB_STEAMID` and `TDB_NOME` environment variables before running the client script (defaults are `76561197960287930` / `Jogador1`). Use the `--diag` flag to enable diagnostic scripts (note: this will significantly impact performance).
-
-## Tools
-
-To grant 50,000 credits to connected player(s) (the exact amount can be adjusted at the top of the script file), run:
-
-```bash
-python -I host\carregar_script_no_host.py <host_PID> host\ferramentas\dar_dinheiro.js
-```
-
-## Known Limitations
-
-* **Local-only:** Currently only tested with both the host and client running on the same PC (`127.0.0.1`). Playing over a LAN network or a VPS requires modifying the server address in the server list and inside `cliente\tdb_fname_join.js`.
-* **Multiplayer stability:** Stable interaction between two separate players is not yet guaranteed; logging in a second simultaneous player is currently untested.
-* **Performance:** Because network replication is recreated via JavaScript hooks (as the client build lacks native `ServerReplicateActors` logic), performance sits around ~40–55 FPS with one client connected.
-
+  ~40–55 quadros/s com um cliente no PC; ~37–40 com dois jogadores na VPS (4 vCPUs).
+- Memória: o host passa de 13 GB com dois jogadores; numa VM de 16 GB ele usa swap (recomendado 32 GB).
+- Os nomes dos jogadores aparecem como `DESKTOP-...-xxxx`.

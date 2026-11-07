@@ -8,7 +8,7 @@
 //   2) avaliacao de distancia, LOTE_DIST candidatos/quadro, por conexao (viewer = pawn do cliente) -> conjunto PERTO (entra a < cull,
 //      sai a > 1.2*cull); 3) a cada CAD_REPL quadros replica o conjunto PERTO de cada conexao (ate MAX_PERTO).
 // Mesmo caminho por ator do replicacao.js: PreReplication -> FindActorChannelRef -> CreateChannelByName -> SetChannelActor -> ReplicateActor.
-// Limitacao: ao sair do alcance o canal NAO e fechado (o cliente fica com a ultima posicao conhecida, longe dele).
+// Ao sair do alcance (1,2x cull) o canal e FECHADO (v2), e o cliente apaga a copia.
 (function () {
 'use strict';
 const B = Process.getModuleByName('TheDayBefore.exe').base;
@@ -52,10 +52,11 @@ const fRepl = new NativeFunction(B.add(RVA.replicateActor), 'int64', ['pointer']
 const weak = Memory.alloc(16), nomeActor = Memory.alloc(8);
 let idxActor = -1, idxWorld = -1, drv = ptr(0), world = ptr(0), quadros = 0, erros = 0, desligado = false, offActors = -1;
 let candidatos = [];                 // lista pronta (ultima varredura completa)
+let candSet = new Set();             // mesmos atores, para checar rapido se ainda valem
 let varr = null;                     // varredura em curso { nivel, idx, lista, total, t0 }
 let iDist = 0;                       // cursor da avaliacao de distancia
 const perto = new Map();             // conn(str) -> Map(ator(str) -> ator)
-const stats = { repl: 0, canais: 0, semNivel: 0, porClasse: {} };
+const stats = { repl: 0, canais: 0, semNivel: 0, porClasse: {}, fechados: 0, fechPorClasse: {} };
 
 function acharDriver() {
   const eng = B.add(RVA.gEngine).readPointer();
@@ -104,6 +105,7 @@ function passoVarredura() {
   }
   if (v.nivel >= nl || v.nivel >= 8192) {
     const antes = candidatos.length; candidatos = v.lista; iDist = 0; varr = null;
+    candSet = new Set(candidatos.map(a => a.toString()));
     if (antes !== candidatos.length) {
       const pc = {}; for (const a of candidatos) { const c = classe(a); pc[c] = (pc[c] || 0) + 1; }
       const top = Object.keys(pc).sort((x, y) => pc[y] - pc[x]).slice(0, 12).map(k => k + ':' + pc[k]).join(', ');
@@ -114,7 +116,7 @@ function passoVarredura() {
 function passoDistancia(conexoes) {
   if (!candidatos.length) return;
   const viewers = [];
-  for (const x of conexoes) { if (x.pawn.isNull()) continue; try { const p = local(x.pawn); if (p) viewers.push({ k: x.c.toString(), p }); } catch (e) {} }
+  for (const x of conexoes) { if (x.pawn.isNull()) continue; try { const p = local(x.pawn); if (p) viewers.push({ k: x.c.toString(), c: x.c, pc: x.pc, pawn: x.pawn, p }); } catch (e) {} }
   if (!viewers.length) return;
   for (let n = 0; n < LOTE_DIST && n < candidatos.length; n++) {
     if (iDist >= candidatos.length) iDist = 0;
@@ -126,11 +128,56 @@ function passoDistancia(conexoes) {
       for (const v of viewers) {
         let m = perto.get(v.k); if (!m) { m = new Map(); perto.set(v.k, m); }
         const d = Math.hypot(p[0] - v.p[0], p[1] - v.p[1], p[2] - v.p[2]), s = a.toString();
-        if (d <= cull) { if (!m.has(s) && m.size < MAX_PERTO) m.set(s, a); }
-        else if (d > cull * SAI) m.delete(s);
+        const kp = v.k + '|' + s;
+        if (d <= cull) { if (!m.has(s) && m.size < MAX_PERTO) m.set(s, a); if (pendentes.has(kp)) pendentes.delete(kp); }
+        else if (d > cull * SAI && m.has(s)) { m.delete(s); if (!preservado(a)) pendentes.set(kp, { t: Date.now(), v, a }); }
       }
     } catch (e) {}
   }
+}
+// v2 (06/11 15:10): FECHA o canal quando o ator sai do alcance (motivo Relevancy = 3), como o ServerReplicateActors do motor faria.
+// Sem isso o cliente ficava com a copia congelada na ultima posicao: zumbis do pool que voltavam ao deposito continuavam "parados" na
+// tela do jogador, que atirava neles e o dano ia para o zumbi verdadeiro, longe (medido 15:07: ReceivePointDamage em zumbis que nao eram
+// os que atacavam). UChannel::Close e o virtual +0x2c8 (achado no Ghidra em FUN_1445011c0: Close(bTearOff ? 4 : 0)).
+// Nao fecha atores do proprio jogador (dono = PC/pawn), que o replicacao_donos.js reabriria logo em seguida.
+// v3 (06/11 22:20): bug "cai no limbo ao voltar do terreno para Woodberry" (medido 22:05 e 22:10, monitor_posicao.js): no teleporte o
+// pawn some de perto da porta e o canal da BP_HouseGateTeleport era fechado na hora (viewer = pawn), apagando a porta no cliente no meio
+// da sequencia dela (cutscene/tela preta/timer/PickSpawnPointLocal); o cliente nao carregava Woodberry, caia e o save gravava a queda.
+// O motor mede pela camera e so fecha depois de RelevantTimeout (5 s). Agora: (1) portas/saidas/teleportes nunca tem o canal fechado;
+// (2) os demais so fecham depois de GRACA_MS fora do alcance (cancelado se voltar).
+const GRACA_MS = 8000;
+const PRESERVAR = /Teleport|Door|Gate|Exit/;
+const pendentes = new Map();         // conn|ator -> { t, v, a }
+const cachePreserv = new Map();      // classe -> bool
+function preservado(a) {
+  const c = classe(a); let r = cachePreserv.get(c);
+  if (r === undefined) { r = PRESERVAR.test(c); cachePreserv.set(c, r); if (r) log('classe preservada (canal nao fecha): ' + c); }
+  return r;
+}
+function processarPendentes(conexoes) {
+  if (!pendentes.size) return;
+  const agora = Date.now();
+  const vivas = new Map(); for (const x of conexoes) vivas.set(x.c.toString(), x);
+  for (const [k, p] of pendentes) {
+    if (agora - p.t < GRACA_MS) continue;
+    pendentes.delete(k);
+    const x = vivas.get(p.v.k); if (!x) continue;                  // conexao caiu: nada a fechar (e o ponteiro nao vale mais)
+    if (!candSet.has(p.a.toString())) continue;                    // ator saiu da lista de candidatos (pode ter sido destruido)
+    fecharCanal({ k: p.v.k, c: x.c, pc: x.pc, pawn: x.pawn }, p.a);
+  }
+}
+function fecharCanal(v, a) {
+  try {
+    const dono = a.add(0x140).readPointer();
+    if (!dono.isNull() && (dono.equals(v.pawn) || dono.equals(v.pc))) return;
+    fWeak(weak, a);
+    const ch = fFind(v.c, weak);
+    if (ch.isNull() || (ch.add(OFF.chFlags).readU8() & 2) !== 0) return;
+    new NativeFunction(ch.readPointer().add(0x2c8).readPointer(), 'int64', ['pointer', 'uint8'])(ch, 3);
+    stats.fechados = (stats.fechados || 0) + 1;
+    const c = classe(a); stats.fechPorClasse[c] = (stats.fechPorClasse[c] || 0) + 1;
+    if (stats.fechPorClasse[c] <= 3) log('canal FECHADO (saiu do alcance): ' + c + ' @' + a);
+  } catch (e) { log('erro fechando canal de ' + classe(a) + ': ' + e); }
 }
 function replicar(conn, a) {
   try {
@@ -170,10 +217,11 @@ Interceptor.attach(B.add(RVA.tickFlush), {
       if (varr === null && (candidatos.length === 0 || quadros - fimVarr >= PAUSA_VARR)) varr = { nivel: 0, idx: 0, lista: [], total: 0, t0: Date.now() };
       if (varr !== null) { passoVarredura(); if (varr === null) fimVarr = quadros; }
       if (conexoes.length) passoDistancia(conexoes);
+      processarPendentes(conexoes);
       if (quadros % CAD_REPL === 0) for (const x of conexoes) { const m = perto.get(x.c.toString()); if (m) for (const a of m.values()) replicar(x.c, a); }
       if (quadros % 1800 === 1) {
         let tam = ''; for (const [k, m] of perto) tam += ' ' + k + '=' + m.size;
-        log('quadro ' + quadros + ': candidatos=' + candidatos.length + ' perto:' + (tam || ' -') + ' ReplicateActor=' + stats.repl + ' canais=' + stats.canais + ' semNivel=' + stats.semNivel + ' erros=' + erros);
+        log('quadro ' + quadros + ': candidatos=' + candidatos.length + ' perto:' + (tam || ' -') + ' ReplicateActor=' + stats.repl + ' canais=' + stats.canais + ' fechados=' + stats.fechados + ' semNivel=' + stats.semNivel + ' erros=' + erros);
       }
     } catch (e) { erros++; log('erro no laco: ' + e); if (erros >= MAX_ERROS) { desligado = true; log('DESLIGADO: erros demais'); } }
   }
