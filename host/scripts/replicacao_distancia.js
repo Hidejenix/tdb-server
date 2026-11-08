@@ -81,7 +81,10 @@ function replicavel(a) {
   if (((a.add(OFF.actFlags5b).readU8() >> 3) & 1) === 0) return false;
   return a.add(OFF.actRemoteRole).readU8() !== 0;
 }
-function local(a) { const r = a.add(OFF.actRoot).readPointer(); if (r.isNull()) return null; const p = r.add(OFF.sceneRelLoc); return [p.readDouble(), p.add(8).readDouble(), p.add(16).readDouble()]; }
+// 07/11: ator anexado (arma na mao) tem RelativeLocation relativa ao encaixe; sobe pelo AttachParent (+0xB0) ate o topo (posicao de mundo).
+function local(a) { let r = a.add(OFF.actRoot).readPointer(); if (r.isNull()) return null;
+  for (let i = 0; i < 8; i++) { const par = r.add(0xb0).readPointer(); if (par.isNull()) break; r = par; }
+  const p = r.add(OFF.sceneRelLoc); return [p.readDouble(), p.add(8).readDouble(), p.add(16).readDouble()]; }
 
 function passoVarredura() {
   const v = varr;

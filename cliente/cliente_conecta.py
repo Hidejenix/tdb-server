@@ -4,12 +4,15 @@ Rode em OUTRA conta do Windows (nao na conta do host): o banco local do Firestor
 processo por usuario. Nessa conta: Python + pacote frida, e acesso de leitura a pasta do jogo.
 
 O que faz:
-  - grava o SteamId do cliente (emulador Goldberg) antes de abrir o jogo;
+  - escolhe o SteamId do jogador (TDB_STEAMID > cliente\steamid.txt > ID gerado na 1a vez e guardado em
+    %LOCALAPPDATA%	db_cliente\steamid.txt) e grava no emulador Goldberg antes de abrir o jogo: cada pessoa = um personagem;
+  - cria steam_settings\disable_lan_only.txt se faltar (sem ele o join num servidor na internet falha);
   - abre o jogo com tdb_connectex_test.js (Google:443 -> terminador TLS local; verificacao de certificado desligada em
     memoria) e tdb_fname_join.js (o join do Server Browser vai para 127.0.0.1:7777);
   - fica rodando ate o jogo fechar. Depois: login, Server Browser, Atualizar, SERVIDOR-LOCAL.
 
-Uso:  python cliente_conecta.py [--diag] [segundos]
+Uso:  python cliente_conecta.py [--host <ip> | --local] [--diag] [--sem-barras-fixas] [--sem-aparencia] [segundos]
+      (servidor na internet: ponha o IP num arquivo host.txt ao lado deste script)
       --diag  liga os scripts de diagnostico de diagnostico\\ (mais lento)
 Pasta do jogo: variavel de ambiente TDB_JOGO (padrao C:\\Games\\THE DAY BEFORE).
 """
@@ -33,37 +36,116 @@ DIAG = DIR / "diagnostico"
 UE_LOGS = Path(os.path.expandvars(r"%LOCALAPPDATA%\Survival\Saved\Logs"))
 
 
-# Identidade Steam do CLIENTE (emulador Goldberg). Host e cliente usam a mesma instalacao, e o emulador le o ID
-# de arquivos na pasta do jogo ao abrir o processo. O host usa outro ID (76561197960271872, ver servidor_host.py).
-# O steam_api64.dll carregado e o da pasta do Engine (force_steamid.txt); o configs.user.ini e gravado junto por seguranca.
-# Cada jogador precisa de um SteamId diferente (o personagem fica em players/<SteamId> no Firestore).
-# 06/11: um SteamId por CONTA DO WINDOWS, para dois clientes no mesmo PC (contas diferentes) serem jogadores diferentes.
-# A instalacao do jogo e compartilhada e o emulador Steam le o ID do arquivo ao abrir: abra um cliente, espere ele chegar ao menu
-# e so entao abra o outro. TDB_STEAMID/TDB_NOME continuam valendo para forcar outro ID.
+# Identidade Steam do CLIENTE (emulador Goldberg). O emulador le o ID de arquivos na pasta do jogo ao abrir o processo, e este
+# script os regrava a cada abertura (por isso editar o force_steamid.txt a mao nao adianta). O host usa 76561197960271872.
+# Cada jogador precisa de um SteamId diferente: o personagem fica em players/<SteamId> no Firestore do servidor.
+# Ordem (07/11):
+#   1) variavel TDB_STEAMID (e TDB_NOME);
+#   2) cliente\steamid.txt ao lado deste script (escolha manual: 1a linha o ID, 2a linha opcional o nome);
+#   3) as duas contas do PC do dono do servidor (tabela abaixo; cada uma ja tem personagem);
+#   4) ID gerado na 1a vez e guardado POR CONTA DO WINDOWS em %LOCALAPPDATA%\tdb_cliente\steamid.txt, para continuar o mesmo
+#      mesmo que a pasta do cliente seja trocada por uma versao nova. Apagar esse arquivo = personagem novo.
+# Dois clientes no mesmo PC: use contas do Windows diferentes; abra um, espere chegar ao menu e so entao abra o outro.
 IDS_POR_CONTA = {
-    "teste": ("76561197960287930", "Jogador1"),   # o personagem que ja existia
+    "teste": ("76561197960287930", "Jogador1"),
     "yan":   ("76561197960287931", "Jogador2"),
 }
-_conta = os.environ.get("USERNAME", "").lower()
-_id_padrao, _nome_padrao = IDS_POR_CONTA.get(_conta, ("76561197960287930", "Jogador1"))
-CLIENTE_STEAM_ID = os.environ.get("TDB_STEAMID", _id_padrao)
-CLIENTE_NOME = os.environ.get("TDB_NOME", _nome_padrao)
+ID_AUTO = Path(os.environ.get("LOCALAPPDATA") or (Path.home() / "AppData" / "Local")) / "tdb_cliente" / "steamid.txt"
 STEAM_ENGINE = Path(JOGO) / r"Engine\Binaries\ThirdParty\Steamworks\Steamv153\Win64\steam_settings"
 STEAM_CFG = Path(WD) / r"steam_settings\configs.user.ini"
 
 
-def definir_identidade(steam_id: str, nome: str) -> None:
+def _nome_ascii(bruto: str, reserva: str) -> str:
+    n = "".join(c for c in bruto if c.isascii() and (c.isalnum() or c in "-_"))[:16]
+    return n or reserva
+
+
+def _ler_id(arq: Path):
+    """(id, nome) de um arquivo steamid.txt, ou None se nao existir / for invalido."""
     try:
-        (STEAM_ENGINE / "force_steamid.txt").write_bytes(steam_id.encode("ascii"))
-        (STEAM_ENGINE / "force_account_name.txt").write_bytes(nome.encode("ascii"))
-        linhas = STEAM_CFG.read_text(encoding="ascii").splitlines()
-        linhas = [("steam_id = " + steam_id) if l.strip().startswith("steam_id") else
-                  ("account_name = " + nome) if l.strip().startswith("account_name") else l for l in linhas]
-        STEAM_CFG.write_text("\n".join(linhas) + "\n", encoding="ascii")
-        print(f"identidade Steam do cliente: {steam_id} ({nome})", flush=True)
+        linhas = [l.strip() for l in arq.read_text(encoding="utf-8", errors="replace").splitlines() if l.strip()]
+    except OSError:
+        return None
+    if not linhas or not (linhas[0].isdigit() and len(linhas[0]) == 17 and linhas[0].startswith("7656119")):
+        if linhas:
+            print(f"AVISO: {arq} nao tem um SteamId valido (17 digitos comecando com 7656119); ignorado", flush=True)
+        return None
+    return linhas[0], (linhas[1] if len(linhas) > 1 else "")
+
+
+# 08/11: --local = servidor no proprio PC (ignora host.txt/TDB_HOST). O launcher usa no modo Offline.
+LOCAL = "--local" in sys.argv
+ID_LOCAL_ANTIGO = ("76561197960287930", "Jogador1")   # ID que o cliente antigo dava a todos: os saves do host local estao nele
+
+
+def escolher_identidade():
+    """Devolve (steam_id, nome, origem)."""
+    conta = os.environ.get("USERNAME", "") or "jogador"
+    if os.environ.get("TDB_STEAMID"):
+        sid = os.environ["TDB_STEAMID"].strip()
+        return sid, _nome_ascii(os.environ.get("TDB_NOME", ""), _nome_ascii(conta, "Jogador")), "variavel TDB_STEAMID"
+    if LOCAL:   # servidor local: mantem o ID de sempre (contas do dono pela tabela; os demais no ID antigo) para os saves locais
+        sid, nome = IDS_POR_CONTA.get(conta.lower(), ID_LOCAL_ANTIGO)
+        return sid, os.environ.get("TDB_NOME", nome), "modo local (ID dos saves do host local)"
+    manual = _ler_id(DIR / "steamid.txt")
+    if manual:
+        return manual[0], _nome_ascii(os.environ.get("TDB_NOME", "") or manual[1], _nome_ascii(conta, "Jogador")), str(DIR / "steamid.txt")
+    if conta.lower() in IDS_POR_CONTA:
+        sid, nome = IDS_POR_CONTA[conta.lower()]
+        return sid, os.environ.get("TDB_NOME", nome), "conta do Windows '" + conta + "'"
+    auto = _ler_id(ID_AUTO)
+    if auto:
+        return auto[0], _nome_ascii(os.environ.get("TDB_NOME", "") or auto[1], _nome_ascii(conta, "Jogador")), str(ID_AUTO)
+    # 1a vez nesta conta do Windows: gera um ID unico (76561198 + 9 digitos aleatorios = 17 digitos, longe dos IDs fixos)
+    import secrets
+    sid = "76561198" + str(100000000 + secrets.randbelow(900000000))
+    nome = _nome_ascii(os.environ.get("TDB_NOME", "") or conta, "Jogador" + sid[-4:])
+    try:
+        ID_AUTO.parent.mkdir(parents=True, exist_ok=True)
+        ID_AUTO.write_text(sid + "\n" + nome + "\n", encoding="utf-8")
+        origem = "NOVO, guardado em " + str(ID_AUTO)
     except OSError as e:
-        atual = (STEAM_ENGINE / "force_steamid.txt").read_text(encoding="ascii", errors="replace")
-        print(f"AVISO: nao consegui gravar a identidade ({e}); force_steamid.txt atual = {atual}", flush=True)
+        origem = f"NOVO, mas nao consegui guardar em {ID_AUTO} ({e}): na proxima abertura sera outro personagem"
+    return sid, nome, origem
+
+
+CLIENTE_STEAM_ID, CLIENTE_NOME, ORIGEM_ID = escolher_identidade()
+
+
+def definir_identidade(steam_id: str, nome: str) -> None:
+    ok = True
+    try:
+        STEAM_ENGINE.mkdir(parents=True, exist_ok=True)
+        (STEAM_ENGINE / "force_steamid.txt").write_bytes(steam_id.encode("ascii"))
+        (STEAM_ENGINE / "force_account_name.txt").write_bytes(nome.encode("ascii", "replace"))
+    except OSError as e:
+        ok = False
+        print(f"AVISO: nao consegui gravar force_steamid.txt em {STEAM_ENGINE} ({e}). Rode o terminal como administrador "
+              f"ou de permissao de escrita na pasta do jogo; sem isso todos entram com o mesmo ID.", flush=True)
+    try:
+        if STEAM_CFG.exists():
+            linhas = STEAM_CFG.read_text(encoding="ascii", errors="replace").splitlines()
+            linhas = [("steam_id = " + steam_id) if l.strip().startswith("steam_id") else
+                      ("account_name = " + nome) if l.strip().startswith("account_name") else l for l in linhas]
+            STEAM_CFG.write_text("\n".join(linhas) + "\n", encoding="ascii", errors="replace")
+    except OSError as e:
+        print(f"AVISO: nao consegui atualizar {STEAM_CFG} ({e})", flush=True)
+    if ok:
+        print(f"identidade Steam do cliente: {steam_id} ({nome}) - origem: {ORIGEM_ID}", flush=True)
+
+
+def liberar_fora_da_lan() -> None:
+    """Sem steam_settings\disable_lan_only.txt o emulador de Steam bloqueia em silencio o trafego do jogo para IPs fora da rede
+    local (o join num servidor na internet da 'erro de conexao'). Cria o arquivo se faltar; nao atrapalha o servidor local."""
+    arq = STEAM_ENGINE / "disable_lan_only.txt"
+    if arq.exists():
+        return
+    try:
+        STEAM_ENGINE.mkdir(parents=True, exist_ok=True)
+        arq.write_bytes(b"")
+        print(f"criado {arq} (libera conexao com servidores fora da rede local)", flush=True)
+    except OSError as e:
+        print(f"AVISO: nao consegui criar {arq} ({e}). Crie esse arquivo vazio a mao, senao a conexao com o servidor falha.", flush=True)
 
 
 def limpar_temp_frida(horas: float = 1) -> int:
@@ -162,7 +244,10 @@ def main() -> int:
     # Host remoto: --host <IPv4> (ou variavel TDB_HOST). Sem isso, o host e este PC (127.0.0.1).
     host = sys.argv[sys.argv.index("--host") + 1] if "--host" in sys.argv else os.environ.get("TDB_HOST", "")
     # Sem --host/TDB_HOST: usa o IP do arquivo host.txt ao lado deste script (uma linha; apague o arquivo para voltar ao host local).
-    if not host and (DIR / "host.txt").exists():
+    if LOCAL:
+        host = ""
+        print("modo local: servidor neste PC (host.txt ignorado)", flush=True)
+    if not host and not LOCAL and (DIR / "host.txt").exists():
         host = (DIR / "host.txt").read_text(encoding="utf-8").strip()
         if host:
             print(f"host lido de host.txt: {host}", flush=True)
@@ -185,6 +270,7 @@ def main() -> int:
         env["GRPC_TRACE"] = "tsi,ssl_transport_security,tcp,client_channel"
     print("modo: " + ("DIAGNOSTICO (--diag)" if diag else "LEVE (sem monitores; use --diag para liga-los)"), flush=True)
     definir_identidade(CLIENTE_STEAM_ID, CLIENTE_NOME)
+    liberar_fora_da_lan()
     n_lixo = limpar_temp_frida()
     if n_lixo:
         print(f"limpeza: {n_lixo} pastas antigas do Frida apagadas do TEMP", flush=True)
@@ -207,6 +293,20 @@ def main() -> int:
     script = session.create_script(source)
     script.on("message", on_message)
     script.load()
+    # 07/11: vida, fome e sede sempre na tela (o HUD do jogo so as mostra quando um valor sobe ou fica critico). Script separado:
+    # um erro nele nao derruba os outros. --sem-barras-fixas desliga.
+    barras = DIR / "barras_sempre_visiveis.js"
+    if "--sem-barras-fixas" not in sys.argv and barras.exists():
+        script_barras = session.create_script(barras.read_text(encoding="utf-8"))
+        script_barras.on("message", on_message)
+        script_barras.load()
+    # 07/11: monta rosto/cabelo dos outros jogadores quando o multicast UpdateSaveCharactersMulticast se perde (sem cabeca).
+    # So visual, a cada 2 s, uma chamada por jogador sem rosto. --sem-aparencia desliga.
+    aparencia = DIR / "aparencia_outros.js"
+    if "--sem-aparencia" not in sys.argv and aparencia.exists():
+        script_aparencia = session.create_script(aparencia.read_text(encoding="utf-8"))
+        script_aparencia.on("message", on_message)
+        script_aparencia.load()
     # Monitor opcional (somente leitura) do GPS no cliente, em script separado para um erro nele nao derrubar os demais.
     extra = DIAG / "monitor_gps_cliente.js"
     if diag and extra.exists():

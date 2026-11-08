@@ -33,7 +33,9 @@ OUT = os.path.join(TMP, "servidor_host%s%s.out" % ("_headless" if SEM_INTERFACE 
 # tdb_connectex_test.js (copia do cliente) vem DEPOIS do ssl_unpin.js: o ssl_unpin desvia antes os IPs de autenticacao
 # para 127.0.0.1:8080; o resto do Google:443 (Firestore gRPC) vai para o terminador TLS -> emulador, desde a abertura.
 SCRIPTS = ["ssl_unpin.js", "tdb_connectex_test.js", "fake_server_join.js", "host_flow_servidor.js",
-           "modo_dedicado.js", "listen_nativo.js", "replicacao.js", "replicacao_donos.js", "replicacao_distancia.js", "disparar_onserverload.js"]
+           "modo_dedicado.js", "listen_nativo.js", "replicacao.js", "replicacao_donos.js", "replicacao_distancia.js", "disparar_onserverload.js",
+           "reaplicar_aparencia.js",
+           "quest_fix.js"]   # 07/11: itens de quest (QuestList dos baus preenchido quando o mapa estabiliza)   # 07/11: rosto/cabelo/barba de quem chega depois (multicast perdido)
 # monitor_bugs.js (06/11): vigia itens sumindo e tiro em zumbi fantasma; filtro em C (CModule), barato. --sem-monitores desliga.
 if "--sem-monitores" not in sys.argv:
     SCRIPTS.append("monitor_bugs.js")
@@ -55,7 +57,7 @@ if "--diag-excecao" in sys.argv:   # 06/11: registra excecoes C++ (tipo, what, b
 # 2a sessao; so funcionou carregado por outro processo Python (06/11 11:00 e 11:08). Ficou como ferramenta manual.
 EMU = os.path.join(SERVICOS, "firestore_emu")
 EXPORT_A_CADA = 60   # segundos
-MARCOS = ("LISTEN OK", "ABORTADO", "ERRO", "DESLIGADO", "NetMode", "canal aberto: Pawn", "chamando OnServerLoad",
+MARCOS = ("LISTEN OK", "reenviada a aparencia", "[qfix]", "ABORTADO", "ERRO", "DESLIGADO", "NetMode", "canal aberto: Pawn", "chamando OnServerLoad",
           "LoginCompleted", "PHASE", "placeholder de cliente visto", "SurvivalPlayer_V2_C", "InitPlayer", "OnError", "erro",
           "SteamId", "Firestore", "ConnectEx IPv", "ITEM SUMIU", "TIRO EM ZUMBI LONGE", "[ping]", "alvos vigiados", "canal FECHADO",
           "TELEPORTE", "TROCOU PAWN", "SEM PAWN", "classe preservada", "RESGATE", "pedido manual")

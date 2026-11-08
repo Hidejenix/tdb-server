@@ -54,6 +54,8 @@ faz o travel para o mapa e abre o listen na UDP 7777. Espere no log
 - **Resgate de queda** ligado por padrão (`host\scripts\resgate_queda.js`): quem cai por 6 s seguidos (ou passa de 1.500 m abaixo do zero)
   é teleportado para o último lugar onde estava pisando, com a velocidade zerada (sem dano de queda); sem lugar seguro, vai para um ponto
   de spawn de Woodberry. No log: `RESGATE`. `--sem-resgate` desliga. Unstuck manual: veja **Ferramentas**.
+- **Aparência de quem chega depois** (`host\scripts
+eaplicar_aparencia.js`, sempre ligado): reenvia rosto/cabelo/barba de um jogador quando o pawn dele chega a outro cliente (sem isso, quem entrou depois podia aparecer sem cabeça para os outros). No log: `reenviada a aparencia`.
 - O Firestore é exportado a cada 60 s para `servicos\firestore_emu\emu_data` (personagens salvos).
 - Uso medido: ~1,5 núcleo de CPU e **~10 GB de RAM** (o mapa inteiro fica carregado).
 
@@ -103,8 +105,62 @@ python cliente\cliente_conecta.py
 ```
 
 No jogo: login → Server Browser → **Atualizar** → **SERVIDOR-LOCAL**.
-Cada jogador precisa de um SteamId próprio: defina `TDB_STEAMID` e `TDB_NOME` antes de rodar
-(padrão `76561197960287930` / `Jogador1`). `--diag` liga os scripts de diagnóstico (mais lento).
+Cada jogador precisa de um SteamId próprio (o personagem fica em `players/<SteamId>`). O cliente cuida disso sozinho: na 1ª vez
+gera um ID e guarda em `%LOCALAPPDATA%	db_cliente\steamid.txt` (por conta do Windows; continua o mesmo ao trocar a pasta do cliente;
+apagar o arquivo = personagem novo). Para escolher o ID: `TDB_STEAMID`/`TDB_NOME` ou um arquivo `cliente\steamid.txt` (1ª linha o ID,
+2ª o nome). Editar `force_steamid.txt` à mão não adianta (o cliente o regrava a cada abertura). O `disable_lan_only.txt` também é
+criado sozinho. `--diag` liga os scripts de diagnóstico (mais lento).
+Vida, fome e sede ficam **sempre na tela** (`clientearras_sempre_visiveis.js`; o HUD original só mostra quando um valor sobe ou fica crítico). `--sem-barras-fixas` volta ao comportamento do jogo.
+
+## Launcher (Online / Offline / atualização automática): `Abrir TDB Launcher.bat`
+
+Janela simples (Python + tkinter, nada extra para instalar além do Python com `frida`):
+- **Jogar Online:** abre o jogo no servidor cujo IP está em `cliente\host.txt`, com o SteamId próprio da pessoa (gerado na 1ª vez).
+- **Jogar Offline:** sobe o servidor do próprio PC (`host\servidor_host.py --appdata-separado`, na mesma conta do Windows), espera o
+  `LISTEN OK` e abre o jogo nele com o ID antigo (`76561197960287930`), onde estão os saves locais. Ao fechar o jogo, fecha o host
+  (com o export final do Firestore) e desliga o emulador e o terminador TLS (porta 443), para o modo Online funcionar depois.
+- Mostra se o servidor online está no ar, a versão instalada e a saída do cliente/host; opção "vida, fome e sede sempre visíveis".
+- **Atualização:** ao abrir e antes de jogar, compara os arquivos com a release mais recente do GitHub
+  (`/releases/latest/download/manifesto.json`) e troca só os diferentes, conferindo o SHA-256 de cada arquivo e do zip. Nunca mexe em
+  `cliente\host.txt`, `cliente\steamid.txt`, `launcher\config.json` nem nos saves (`servicos\`). Se o próprio launcher mudar, ele reabre.
+- Cliente sem launcher: `python cliente\cliente_conecta.py` (online) ou `python cliente\cliente_conecta.py --local` (servidor do PC).
+
+**Publicar uma versão nova (dono do servidor):**
+```
+python -I launcher\publicar_versao.py 2026.11.08-2 --notas "o que mudou"
+```
+Gera `dist\<versao>\manifesto.json` e `atualizacao.zip` (cliente, launcher e scripts do host; sem IP, SteamId nem saves). Suba os 2 arquivos
+numa release nova em https://github.com/yan1451/tdb-server/releases/new marcada como *latest* (ou use `--publicar` com o GitHub CLI `gh`).
+
+## Painel de gerenciamento (Azure + VPS): `painel/`
+
+Painel no navegador, que roda **no seu PC**. Ele usa o Azure CLI já logado (`az login`) e a chave SSH da VM.
+
+```bash
+python -I painel\painel.py
+```
+
+Ou dê dois cliques em `painel\abrir_painel.bat`. O painel abre `http://127.0.0.1:8765`.
+
+- **Controle:**
+  - ligar e desalocar a VM (antes de desalocar, derruba o servidor e salva os personagens);
+  - subir o servidor (versão normal ou otimizada; opcional: enviar antes os scripts do PC) e derrubar;
+  - saída das tarefas ao vivo.
+- **Jogadores:** quem está conectado, com ping, posição e último evento (do monitor de ping e do de posição).
+- **Monitores:** liga e desliga ao vivo cada monitor (ping, posição, resgate de queda, bugs, loot e tiro). O painel sobe o host com `--sem-monitores --sem-resgate` e carrega cada monitor como processo separado na VPS; a escolha fica salva.
+- **Logs:** runner, console, serviços, Firestore, exports e o log de cada monitor, com filtro, "sem ruído" e atualização automática.
+- **Configuração:** copie `painel\config.exemplo.json` para `painel\config.json` e preencha grupo, VM, IP, usuário e chave. Esse arquivo não vai para o GitHub.
+- **Segurança:** o painel escuta só em `127.0.0.1`, e as ações exigem um token gerado a cada execução, embutido na página.
+
+## Versão otimizada (experimental): `host_otimizado/`
+
+Cópia do `host/` com a replicação num só script, `replicacao_otimizada.js`, em duas frentes:
+- **laço em C** (CModule do Frida);
+- **ritmo de cada ator** pelo `NetUpdateFrequency`.
+
+O log mostra a cada 60 s o tick e o tempo gasto por quadro (`[otim]`). Detalhes, teste fora do jogo e como voltar estão em
+[host_otimizado/LEIA.md](host_otimizado/LEIA.md). Para usar: `python -I host_otimizado\servidor_host.py`, ou na VPS
+`TDB_HOST_PASTA=host_otimizado bash linux/subir_tudo.sh`.
 
 ## Ferramentas
 

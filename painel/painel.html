@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Painel TDB</title>
+<style>
+:root{--bg:#f4f5f7;--card:#fff;--txt:#1d2330;--sub:#5d6678;--borda:#e1e4ea;--ok:#1f9d55;--ok-bg:#e3f6ea;--erro:#c9372c;--erro-bg:#fbe7e5;
+--aviso:#b7791f;--aviso-bg:#fdf3dc;--prim:#2f6fed;--prim-txt:#fff;--neutro:#eef0f4;--mono:#0f1420;--mono-txt:#d7dde8}
+@media (prefers-color-scheme:dark){:root{--bg:#11141b;--card:#1a1f29;--txt:#e6e9ef;--sub:#97a0b3;--borda:#2a3140;--ok:#3ccf7a;--ok-bg:#163223;
+--erro:#ff6b5e;--erro-bg:#3a1c1a;--aviso:#f0b54a;--aviso-bg:#352b14;--prim:#5b8cff;--neutro:#242b38;--mono:#0b0e14}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--txt);font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif}
+header{display:flex;align-items:center;gap:16px;padding:14px 20px;border-bottom:1px solid var(--borda);background:var(--card);position:sticky;top:0;z-index:2}
+header h1{font-size:16px;margin:0;font-weight:650}header .sub{color:var(--sub);font-size:12px}
+nav{display:flex;gap:4px;margin-left:auto}nav button{border:0;background:none;color:var(--sub);padding:8px 12px;border-radius:8px;cursor:pointer;font:inherit}
+nav button.ativo{background:var(--neutro);color:var(--txt);font-weight:600}
+main{max-width:1180px;margin:0 auto;padding:20px;display:none}main.ativo{display:block}
+.grade{display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:16px}
+.card{background:var(--card);border:1px solid var(--borda);border-radius:12px;padding:16px}
+.card h2{font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:var(--sub);margin:0 0 12px;font-weight:600}
+.linha{display:flex;justify-content:space-between;gap:12px;padding:6px 0;border-bottom:1px dashed var(--borda)}.linha:last-child{border-bottom:0}
+.linha span:first-child{color:var(--sub)}
+.selo{display:inline-flex;align-items:center;gap:6px;padding:2px 10px;border-radius:999px;font-size:12px;font-weight:600;background:var(--neutro)}
+.selo.ok{background:var(--ok-bg);color:var(--ok)}.selo.erro{background:var(--erro-bg);color:var(--erro)}.selo.aviso{background:var(--aviso-bg);color:var(--aviso)}
+.selo::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor}
+.botoes{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+button.b{border:1px solid var(--borda);background:var(--card);color:var(--txt);padding:8px 14px;border-radius:8px;cursor:pointer;font:inherit;font-weight:550}
+button.b:hover{border-color:var(--sub)}button.b.prim{background:var(--prim);color:var(--prim-txt);border-color:var(--prim)}
+button.b.perigo{color:var(--erro);border-color:var(--erro)}button.b:disabled{opacity:.45;cursor:not-allowed}
+select,input[type=text]{background:var(--card);color:var(--txt);border:1px solid var(--borda);border-radius:8px;padding:7px 10px;font:inherit}
+label.chk{display:inline-flex;align-items:center;gap:6px;color:var(--sub);font-size:13px}
+pre{background:var(--mono);color:var(--mono-txt);border-radius:10px;padding:12px;margin:0;font:12px/1.5 ui-monospace,Consolas,monospace;
+white-space:pre-wrap;word-break:break-word;overflow:auto}
+#saidaTarefa{height:260px}#textoLog{height:calc(100vh - 230px);min-height:300px}
+table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:9px 8px;border-bottom:1px solid var(--borda)}th{color:var(--sub);font-weight:600;font-size:12px}
+.vazio{color:var(--sub);padding:24px;text-align:center}
+.mon{display:flex;gap:14px;align-items:flex-start;padding:12px 0;border-bottom:1px solid var(--borda)}.mon:last-child{border-bottom:0}
+.mon .info{flex:1}.mon .nome{font-weight:600}.mon .desc{color:var(--sub);font-size:13px}
+.chave{position:relative;width:42px;height:24px;flex:none;margin-top:2px}.chave input{opacity:0;width:0;height:0}
+.chave span{position:absolute;inset:0;background:var(--neutro);border:1px solid var(--borda);border-radius:999px;cursor:pointer;transition:.15s}
+.chave span::before{content:"";position:absolute;width:18px;height:18px;left:2px;top:2px;background:var(--sub);border-radius:50%;transition:.15s}
+.chave input:checked+span{background:var(--prim);border-color:var(--prim)}.chave input:checked+span::before{transform:translateX(18px);background:#fff}
+.barra{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:12px}
+.otim{font:12px ui-monospace,Consolas,monospace;color:var(--sub);word-break:break-word;margin-top:10px}
+.aviso-txt{color:var(--aviso);font-size:13px;margin-top:8px}
+@media (max-width:640px){header{flex-wrap:wrap}nav{margin-left:0;width:100%;overflow-x:auto}main{padding:12px}}
+</style>
+</head>
+<body>
+<header>
+  <div><h1>Painel do servidor The Day Before</h1><div class="sub" id="atualizado">carregando...</div></div>
+  <nav>
+    <button data-aba="controle" class="ativo">Controle</button>
+    <button data-aba="jogadores">Jogadores</button>
+    <button data-aba="monitores">Monitores</button>
+    <button data-aba="logs">Logs</button>
+  </nav>
+</header>
+
+<main id="controle" class="ativo">
+  <div class="grade">
+    <section class="card">
+      <h2>Maquina virtual (Azure)</h2>
+      <div class="linha"><span>Estado</span><span id="vmEstado" class="selo">...</span></div>
+      <div class="linha"><span>Tamanho</span><span id="vmTam">-</span></div>
+      <div class="linha"><span>IP publico</span><span id="vmIp">-</span></div>
+      <div class="linha"><span>Memoria da VM</span><span id="vmMem">-</span></div>
+      <div class="botoes">
+        <button class="b prim" id="btLigarVm">Ligar VM</button>
+        <button class="b perigo" id="btDesalocar">Desalocar VM</button>
+        <button class="b" id="btAtualizar">Atualizar</button>
+      </div>
+      <div class="aviso-txt">Ligada, a VM cobra CPU. Desalocar derruba o servidor e salva os personagens antes.</div>
+    </section>
+    <section class="card">
+      <h2>Servidor do jogo</h2>
+      <div class="linha"><span>Firestore / TLS</span><span><span id="svFs" class="selo">-</span> <span id="svTls" class="selo">-</span></span></div>
+      <div class="linha"><span>Host</span><span id="hostEstado" class="selo">-</span></div>
+      <div class="linha"><span>Versao em uso</span><span id="hostPasta">-</span></div>
+      <div class="linha"><span>Jogadores</span><span id="hostJog">-</span></div>
+      <div class="linha"><span>Host: memoria / CPU</span><span id="hostRec">-</span></div>
+      <div class="botoes" style="align-items:center">
+        <select id="selVersao"><option value="host_otimizado">Versao otimizada</option><option value="host">Versao normal</option></select>
+        <label class="chk"><input type="checkbox" id="chkEnviar" checked> enviar scripts do PC antes</label>
+      </div>
+      <div class="botoes">
+        <button class="b prim" id="btSubir">Subir servidor</button>
+        <button class="b perigo" id="btDerrubar">Derrubar servidor</button>
+      </div>
+      <div class="otim" id="otimLinha"></div>
+    </section>
+  </div>
+  <section class="card" style="margin-top:16px">
+    <h2 id="tarefaTitulo">Tarefa</h2>
+    <pre id="saidaTarefa">Nenhuma tarefa ainda.</pre>
+  </section>
+</main>
+
+<main id="jogadores">
+  <section class="card">
+    <h2>Jogadores conectados</h2>
+    <table><thead><tr><th>Jogador</th><th>Ping</th><th>Posicao (m)</th><th>Ultimo evento</th><th>Atualizado (UTC)</th></tr></thead>
+    <tbody id="tabJog"></tbody></table>
+    <div class="aviso-txt" id="jogAviso"></div>
+  </section>
+</main>
+
+<main id="monitores">
+  <section class="card">
+    <h2>Monitores e ferramentas no host</h2>
+    <div id="listaMon"></div>
+    <div class="aviso-txt">Cada monitor roda como processo separado na VPS e liga/desliga na hora. A escolha fica salva e vale nas proximas subidas.</div>
+  </section>
+</main>
+
+<main id="logs">
+  <section class="card">
+    <div class="barra">
+      <select id="logFonte">
+        <option value="runner">Servidor (runner)</option>
+        <option value="console">Console do host</option>
+        <option value="servicos">Servicos</option>
+        <option value="firestore">Firestore</option>
+        <option value="export">Exports do Firestore</option>
+      </select>
+      <input type="text" id="logFiltro" placeholder="filtrar (ex.: ERRO, [otim], RESGATE)" style="flex:1;min-width:180px">
+      <select id="logN"><option>200</option><option selected>500</option><option>1500</option></select>
+      <label class="chk"><input type="checkbox" id="logLimpo" checked> sem ruido</label>
+      <label class="chk"><input type="checkbox" id="logAuto"> atualizar a cada 5 s</label>
+      <button class="b" id="btLog">Carregar</button>
+    </div>
+    <pre id="textoLog">Escolha a fonte e clique em Carregar.</pre>
+  </section>
+</main>
+
+<script>
+const TOKEN = "%TOKEN%";
+const $ = id => document.getElementById(id);
+let est = null, tarefaId = 0, tarefaLinhas = 0, ocupado = false;
+
+async function api(caminho, corpo) {
+  const op = { headers: { "X-Painel-Token": TOKEN } };
+  if (corpo) { op.method = "POST"; op.headers["Content-Type"] = "application/json"; op.body = JSON.stringify(corpo); }
+  const r = await fetch(caminho, op); return r.json();
+}
+function selo(el, txt, tipo) { el.textContent = txt; el.className = "selo" + (tipo ? " " + tipo : ""); }
+
+document.querySelectorAll("nav button").forEach(b => b.onclick = () => {
+  document.querySelectorAll("nav button").forEach(x => x.classList.toggle("ativo", x === b));
+  document.querySelectorAll("main").forEach(m => m.classList.toggle("ativo", m.id === b.dataset.aba));
+  if (b.dataset.aba === "logs" && $("textoLog").textContent.startsWith("Escolha")) carregarLog();
+});
+
+function render() {
+  if (!est) return;
+  const vm = est.vm || {}, ligada = vm.estado === "VM running", vps = est.vps;
+  const tipoVm = ligada ? "ok" : (vm.estado || "").includes("deallocated") ? "" : (vm.estado === "erro" ? "erro" : "aviso");
+  const nomes = { "VM running": "Ligada", "VM deallocated": "Desalocada", "VM stopped": "Parada (ainda cobra)", "VM starting": "Ligando...",
+                  "VM deallocating": "Desalocando...", "VM stopping": "Parando..." };
+  selo($("vmEstado"), nomes[vm.estado] || vm.estado || "?", tipoVm);
+  $("vmTam").textContent = vm.tamanho || "-"; $("vmIp").textContent = est.ip || "-";
+  const v = vps && vps.ok ? vps : null;
+  $("vmMem").textContent = v ? (v.vm.mem_usada / 1024).toFixed(1) + " / " + (v.vm.mem_total / 1024).toFixed(1) + " GB (carga " + v.vm.carga + ")" : "-";
+  if (v) {
+    selo($("svFs"), "Firestore", v.servicos.firestore ? "ok" : "erro"); selo($("svTls"), "TLS", v.servicos.tls ? "ok" : "erro");
+    const h = v.host;
+    if (!h.rodando) selo($("hostEstado"), "Parado", "");
+    else if (h.listen) selo($("hostEstado"), "No ar (LISTEN " + h.listen + " UTC)", "ok");
+    else selo($("hostEstado"), "Subindo...", "aviso");
+    $("hostPasta").textContent = h.rodando ? (h.pasta === "host_otimizado" ? "otimizada" : h.pasta === "host" ? "normal" : h.pasta || "?") : "-";
+    $("hostJog").textContent = h.rodando ? String((v.jogadores || []).length) : "-";
+    $("hostRec").textContent = h.rss_mb ? (h.rss_mb / 1024).toFixed(1) + " GB / " + h.cpu.toFixed(0) + "%" : "-";
+    $("otimLinha").textContent = v.otim ? v.otim.replace(/^\S+ MSG /, "") : "";
+  } else {
+    ["svFs", "svTls", "hostEstado"].forEach(id => selo($(id), ligada ? (vps && !vps.ok ? "SSH falhou" : "...") : "-", ligada && vps && !vps.ok ? "erro" : ""));
+    $("hostPasta").textContent = "-"; $("hostJog").textContent = "-"; $("hostRec").textContent = "-"; $("otimLinha").textContent = "";
+  }
+  $("selVersao").value = est.versao; $("chkEnviar").checked = !!est.enviar_scripts;
+  const hostOn = v && v.host.rodando;
+  $("btLigarVm").disabled = ocupado || ligada; $("btDesalocar").disabled = ocupado || !ligada && !(vm.estado || "").includes("stopped");
+  $("btSubir").disabled = ocupado || !ligada || hostOn; $("btDerrubar").disabled = ocupado || !ligada;
+  // jogadores
+  const jog = v ? v.jogadores || [] : [];
+  $("tabJog").innerHTML = "";
+  if (!jog.length) $("tabJog").innerHTML = '<tr><td colspan="5" class="vazio">' + (hostOn ? "Nenhum jogador conectado." : "Servidor fora do ar.") + "</td></tr>";
+  for (const j of jog) {
+    const tr = document.createElement("tr");
+    const cel = t => { const td = document.createElement("td"); td.textContent = t; tr.appendChild(td); };
+    cel(j.nome); cel(j.ping != null ? j.ping + " ms" : "-"); cel(j.pos ? j.pos.map(x => x.toFixed(0)).join(", ") : "-");
+    cel(j.marca || "-"); cel(j.pos_hora || (v && v.ping_hora) || "-");
+    $("tabJog").appendChild(tr);
+  }
+  const monPing = (est.monitores || []).find(m => m.id === "monitor_ping");
+  $("jogAviso").textContent = hostOn && v.monitores_rodando.indexOf("monitor_ping") < 0 ? "Ligue o monitor \"Ping dos jogadores\" para ver quem esta conectado." : "";
+  // monitores
+  const lista = $("listaMon"); lista.innerHTML = "";
+  for (const m of est.monitores || []) {
+    const rodando = v && v.monitores_rodando.indexOf(m.id) >= 0;
+    const d = document.createElement("div"); d.className = "mon";
+    const ch = document.createElement("label"); ch.className = "chave";
+    const inp = document.createElement("input"); inp.type = "checkbox"; inp.checked = m.ligado; inp.disabled = ocupado;
+    inp.onchange = () => acao({ acao: "monitor", id: m.id, ligar: inp.checked }, (inp.checked && m.escreve) ? "Este monitor ALTERA o jogo (" + m.nome + "). Ligar?" : null);
+    ch.appendChild(inp); ch.appendChild(document.createElement("span"));
+    const info = document.createElement("div"); info.className = "info";
+    const n = document.createElement("div"); n.className = "nome"; n.textContent = m.nome + " ";
+    const s = document.createElement("span"); selo(s, !v ? "VM/host fora" : rodando ? "rodando" : "parado", rodando ? "ok" : ""); n.appendChild(s);
+    const ds = document.createElement("div"); ds.className = "desc"; ds.textContent = m.desc;
+    info.appendChild(n); info.appendChild(ds); d.appendChild(ch); d.appendChild(info); lista.appendChild(d);
+    if (!document.querySelector('#logFonte option[value="' + m.id + '"]')) {
+      const o = document.createElement("option"); o.value = m.id; o.textContent = "Monitor: " + m.nome; $("logFonte").appendChild(o);
+    }
+  }
+}
+
+async function atualizar(forcar) {
+  try {
+    est = await api("/api/estado" + (forcar ? "?forcar=1" : ""));
+    ocupado = est.tarefa && est.tarefa.ativa;
+    $("atualizado").textContent = "atualizado " + new Date().toLocaleTimeString() + (ocupado ? " · tarefa em andamento: " + est.tarefa.nome : "");
+    render();
+  } catch (e) { $("atualizado").textContent = "erro ao falar com o painel: " + e; }
+}
+
+async function acompanharTarefa() {
+  try {
+    const t = await api("/api/tarefa?desde=" + tarefaLinhas);
+    if (t.id !== tarefaId) { tarefaId = t.id; tarefaLinhas = 0; $("saidaTarefa").textContent = ""; const r = await api("/api/tarefa?desde=0"); return mostrarTarefa(r); }
+    mostrarTarefa(t);
+  } catch (e) {}
+}
+function mostrarTarefa(t) {
+  if (!t.id) return;
+  if (t.linhas && t.linhas.length) {
+    const p = $("saidaTarefa"), fim = p.scrollTop + p.clientHeight >= p.scrollHeight - 20;
+    p.textContent += (tarefaLinhas ? "\n" : "") + t.linhas.join("\n"); tarefaLinhas += t.linhas.length;
+    if (fim) p.scrollTop = p.scrollHeight;
+  }
+  $("tarefaTitulo").textContent = "Tarefa: " + t.nome + (t.ativa ? " (em andamento)" : t.ok ? " (concluida)" : " (falhou)");
+  if (ocupado && !t.ativa) { ocupado = false; atualizar(true); }
+}
+
+async function acao(corpo, pergunta) {
+  if (pergunta && !confirm(pergunta)) { render(); return; }
+  const r = await api("/api/acao", corpo);
+  if (!r.ok) alert(r.msg || r.erro || "falhou");
+  ocupado = !!r.ok; render(); acompanharTarefa();
+  document.querySelector('nav button[data-aba="controle"]').click();
+}
+
+$("btLigarVm").onclick = () => acao({ acao: "ligar_vm" }, "Ligar a VM? A cobranca de CPU comeca agora.");
+$("btDesalocar").onclick = () => {
+  const n = est && est.vps && est.vps.ok ? (est.vps.jogadores || []).length : 0;
+  acao({ acao: "desalocar_vm" }, (n ? "Ha " + n + " jogador(es) conectado(s)! " : "") + "Derrubar o servidor (salvando os personagens) e desalocar a VM?");
+};
+$("btSubir").onclick = () => acao({ acao: "subir", versao: $("selVersao").value, enviar: $("chkEnviar").checked });
+$("btDerrubar").onclick = () => {
+  const n = est && est.vps && est.vps.ok ? (est.vps.jogadores || []).length : 0;
+  acao({ acao: "derrubar" }, (n ? "Ha " + n + " jogador(es) conectado(s)! " : "") + "Derrubar o servidor? Os personagens sao salvos antes.");
+};
+$("btAtualizar").onclick = () => atualizar(true);
+
+async function carregarLog() {
+  const q = new URLSearchParams({ fonte: $("logFonte").value, n: $("logN").value, filtro: $("logFiltro").value, limpo: $("logLimpo").checked ? "1" : "0" });
+  $("btLog").disabled = true;
+  try { const r = await api("/api/logs?" + q); const p = $("textoLog"); p.textContent = r.texto; p.scrollTop = p.scrollHeight; }
+  catch (e) { $("textoLog").textContent = "erro: " + e; }
+  $("btLog").disabled = false;
+}
+$("btLog").onclick = carregarLog;
+$("logFiltro").onkeydown = e => { if (e.key === "Enter") carregarLog(); };
+setInterval(() => { if ($("logAuto").checked && $("logs").classList.contains("ativo")) carregarLog(); }, 5000);
+
+atualizar(true); acompanharTarefa();
+setInterval(() => atualizar(false), 10000);
+setInterval(acompanharTarefa, 1500);
+</script>
+</body>
+</html>

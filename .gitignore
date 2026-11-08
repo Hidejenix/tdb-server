@@ -12,3 +12,14 @@ linux/vps.conf
 logs/
 __pycache__/
 *linux/
+# configuracao local do painel (IP da VM, caminho da chave)
+painel/config.json
+# IP do servidor e SteamId local do cliente (nao publicar)
+cliente/host.txt
+cliente/steamid.txt
+cliente_para_enviar.zip
+# launcher: versoes geradas para publicar, configuracao e versao locais
+dist/
+launcher/config.json
+launcher/versao.txt
+launcher/__pycache__/

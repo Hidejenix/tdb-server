@@ -1,0 +1,12 @@
+{
+  "grupo": "SEU-GRUPO-DE-RECURSOS",
+  "vm": "NOME-DA-VM",
+  "ip": "IP-PUBLICO-DA-VM",
+  "usuario": "azureuser",
+  "chave": "C:\\Users\\SEU_USUARIO\\.ssh\\chave_da_vm.pem",
+  "porta": 8765,
+  "pasta_remota": "~/tdb/servidor",
+  "versao": "host_otimizado",
+  "enviar_scripts": true,
+  "monitores_ligados": ["monitor_ping", "monitor_posicao", "resgate_queda", "monitor_bugs"]
+}
