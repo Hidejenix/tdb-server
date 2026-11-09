@@ -23,3 +23,4 @@ dist/
 launcher/config.json
 launcher/versao.txt
 launcher/__pycache__/
+launcher/launcher.log*

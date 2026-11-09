@@ -126,6 +126,8 @@ Janela simples (Python + tkinter, nada extra para instalar além do Python com `
 - **Atualização:** ao abrir e antes de jogar, compara os arquivos com a release mais recente do GitHub
   (`/releases/latest/download/manifesto.json`) e troca só os diferentes, conferindo o SHA-256 de cada arquivo e do zip. Nunca mexe em
   `cliente\host.txt`, `cliente\steamid.txt`, `launcher\config.json` nem nos saves (`servicos\`). Se o próprio launcher mudar, ele reabre.
+- **Erros:** tudo que aparece na janela (e qualquer erro, com o traceback) fica em `launcher\launcher.log` — botão **Log do launcher**.
+  Ao abrir, o launcher confere se o Frida está instalado e avisa (`pip install frida frida-tools`). **Parar** fecha o jogo na hora.
 - Cliente sem launcher: `python cliente\cliente_conecta.py` (online) ou `python cliente\cliente_conecta.py --local` (servidor do PC).
 
 **Publicar uma versão nova (dono do servidor):**

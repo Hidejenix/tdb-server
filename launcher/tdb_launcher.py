@@ -19,6 +19,7 @@ import sys
 import threading
 import time
 import tkinter as tk
+import traceback
 from pathlib import Path
 from tkinter import filedialog, messagebox, scrolledtext
 
@@ -34,6 +35,44 @@ HOST_TXT = RAIZ / "cliente" / "host.txt"
 LOG_HOST = Path(os.environ.get("TEMP", ".")) / "servidor_host_headless.out"
 SEM_JANELA = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 IMAGENS_SERVICO = {"java.exe", "node.exe", "python.exe", "pythonw.exe"}
+LOG_LAUNCHER = AQUI / "launcher.log"
+_trava_log = threading.Lock()
+
+
+def gravar_log(texto: str) -> None:
+    """Tudo que aparece na janela vai tambem para launcher\\launcher.log (para o jogador mandar quando der erro)."""
+    with _trava_log:
+        try:
+            if LOG_LAUNCHER.exists() and LOG_LAUNCHER.stat().st_size > 2_000_000:
+                os.replace(LOG_LAUNCHER, LOG_LAUNCHER.with_name("launcher.log.anterior"))
+            with open(LOG_LAUNCHER, "a", encoding="utf-8") as f:
+                f.write(texto.rstrip("\n") + "\n")
+        except OSError:
+            pass
+
+
+class _SaidaParaLog:
+    """No pythonw nao ha console: print e erros soltos iriam para lugar nenhum. Manda para o launcher.log."""
+    def write(self, t):
+        if t and t.strip():
+            gravar_log(time.strftime("%H:%M:%S ") + t)
+
+    def flush(self):
+        pass
+
+
+if sys.stderr is None or sys.stdout is None:
+    sys.stdout = sys.stderr = _SaidaParaLog()
+
+
+def frida_instalado(py: str) -> str:
+    """Versao do frida no Python que vai rodar o cliente, ou '' se nao estiver instalado."""
+    try:
+        r = subprocess.run([py, "-I", "-c", "import frida; print(frida.__version__)"], capture_output=True, text=True, timeout=60,
+                           creationflags=SEM_JANELA)
+        return r.stdout.strip() if r.returncode == 0 else ""
+    except Exception:
+        return ""
 
 
 def ler_cfg() -> dict:
@@ -135,8 +174,10 @@ class Launcher:
         self.parando = False
         self._montar()
         self.r.after(100, self._drenar)
+        raiz.report_callback_exception = lambda tp, ex, tb: self.erro("erro na janela", ex)
         threading.Thread(target=self._checar_servidor_laco, daemon=True).start()
-        threading.Thread(target=self._checar_atualizacao, daemon=True).start()
+        self._rodar("verificar atualizacao", self._checar_atualizacao, limpar=False)
+        self._rodar("diagnostico", self._diagnostico, limpar=False)
 
     # ------------------------------------------------------------------ interface
     def _montar(self):
@@ -166,7 +207,7 @@ class Launcher:
         self.b_parar.pack(side="left")
         self.b_atualizar = tk.Button(bot, text="Procurar atualização", command=self.atualizar_manual, **estilo2)
         self.b_atualizar.pack(side="left", padx=8)
-        tk.Button(bot, text="Pasta de logs", command=self.abrir_logs, **estilo2).pack(side="left")
+        tk.Button(bot, text="Log do launcher", command=self.abrir_log_launcher, **estilo2).pack(side="left")
 
         jog = tk.Frame(r, bg=fundo); jog.pack(fill="x", padx=16, pady=(0, 6))
         tk.Label(jog, text="Pasta do jogo:", bg=fundo, fg=sec, font=("Segoe UI", 10)).pack(side="left")
@@ -185,11 +226,49 @@ class Launcher:
         self.txt.configure(state="disabled")
         r.protocol("WM_DELETE_WINDOW", self.fechar)
 
+    def _diagnostico(self):
+        py = python_console()
+        gravar_log("=" * 60)
+        self.log("launcher %s | Python %s (%s) | pasta do jogo: %s" % (atualizador.versao_local(), sys.version.split()[0], py,
+                                                                     self.pasta_jogo() or "NAO ENCONTRADA"))
+        v = frida_instalado(py)
+        if v:
+            self.log("frida %s instalado" % v)
+        else:
+            self.log("ERRO: o pacote frida NAO esta instalado neste Python. O jogo nao abre sem ele.")
+            self.fila.put(("aviso", "O Frida não está instalado no Python deste PC (%s).\n\nAbra o Prompt de Comando e rode:\n"
+                                    "    pip install frida frida-tools\n\nDepois abra o launcher de novo." % py))
+
     def _salvar_opcoes(self):
         self.cfg["barras_fixas"] = bool(self.v_barras.get()); salvar_cfg(self.cfg)
 
     def log(self, msg: str):
-        self.fila.put(("log", time.strftime("%H:%M:%S ") + msg))
+        linha = time.strftime("%H:%M:%S ") + msg
+        gravar_log(linha)
+        self.fila.put(("log", linha))
+
+    def erro(self, titulo: str, exc: BaseException = None):
+        """Registra um erro com o traceback completo (janela + launcher.log) e mostra um aviso."""
+        detalhe = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)) if exc else ""
+        self.log("ERRO: " + titulo + (": %s" % exc if exc else ""))
+        for l in detalhe.rstrip().splitlines():
+            self.log("    " + l)
+        self.fila.put(("aviso", "%s\n\n%s\n\nDetalhes em %s" % (titulo, exc or "", LOG_LAUNCHER)))
+
+    def _rodar(self, nome: str, fn, limpar=True):
+        """Roda fn numa thread; qualquer excecao vira erro visivel e, se for um fluxo de jogo, o launcher volta ao estado Pronto."""
+        def alvo():
+            try:
+                fn()
+            except Exception as e:
+                self.erro("falha em '%s'" % nome, e)
+                if limpar and self.modo:
+                    try:
+                        self._encerrar_processos(rapido=True)
+                    except Exception as e2:
+                        self.erro("falha ao encerrar os processos", e2)
+                    self._fim()
+        threading.Thread(target=alvo, daemon=True, name=nome).start()
 
     def estado(self, msg: str):
         self.fila.put(("estado", msg))
@@ -213,6 +292,8 @@ class Launcher:
                     self._botoes(val)
                 elif tipo == "reiniciar":
                     self._reiniciar_launcher()
+                elif tipo == "aviso":
+                    messagebox.showerror("TDB Launcher", val, parent=self.r)
         except queue.Empty:
             pass
         self.r.after(100, self._drenar)
@@ -285,7 +366,7 @@ class Launcher:
                 self.estado("Já está na versão mais recente.")
             else:
                 self.estado("Não consegui verificar atualizações.")
-        threading.Thread(target=t, daemon=True).start()
+        self._rodar("procurar atualizacao", t, limpar=False)
 
     def _reiniciar_launcher(self):
         subprocess.Popen([sys.executable, "-I", str(AQUI / "tdb_launcher.py")], cwd=str(RAIZ))
@@ -376,7 +457,7 @@ class Launcher:
             self.proc_cliente.wait()
             self.log("jogo fechado.")
             self._fim()
-        threading.Thread(target=t, daemon=True).start()
+        self._rodar("jogar online", t)
 
     def jogar_offline(self):
         if not HOST.exists():
@@ -411,15 +492,15 @@ class Launcher:
             if not pronto:
                 if not self.parando:
                     self.log("ERRO: o servidor local não ficou pronto (veja %s)" % LOG_HOST)
-                self._parar_offline(); self._fim(); return
+                self._parar_offline(rapido=True); self._fim(); return
             self.log("servidor local pronto.")
             self.estado("Abrindo o jogo (Offline)...")
             self._iniciar_cliente(local=True)
             self.proc_cliente.wait()
             self.log("jogo fechado.")
-            self._parar_offline()
+            self._parar_offline(rapido=self.parando)
             self._fim()
-        threading.Thread(target=t, daemon=True).start()
+        self._rodar("jogar offline", t)
 
     def _pid_host(self):
         try:
@@ -428,16 +509,16 @@ class Launcher:
         except OSError:
             return None
 
-    def _parar_offline(self):
+    def _parar_offline(self, rapido=False):
         self.estado("Fechando o servidor local e salvando...")
         pid = self._pid_host()
         if pid and imagem_do_pid(pid) == "thedaybefore.exe":
             matar(pid); self.log("host local fechado (PID %d); esperando o export final do Firestore..." % pid)
         if self.proc_host and self.proc_host.poll() is None:
             try:
-                self.proc_host.wait(timeout=180)
+                self.proc_host.wait(timeout=45 if rapido else 150)   # o runner faz o export final do Firestore ao sair
             except subprocess.TimeoutExpired:
-                self.log("o runner do host não terminou em 3 min; encerrando à força")
+                self.log("o runner do host não terminou a tempo; encerrando à força")
                 matar(self.proc_host.pid)
         # servicos locais (emulador do Firestore, ponte IPv6, terminador TLS) ficam soltos depois do runner: desliga
         for p in pids_escutando({443, 8081, 4400, 4500, 9150}):
@@ -445,6 +526,15 @@ class Launcher:
             if img in IMAGENS_SERVICO:
                 matar(p); self.log("serviço local desligado: %s (PID %d)" % (img, p))
         self.proc_host = None
+
+    def _encerrar_processos(self, rapido=True):
+        """Fecha o jogo e o cliente na hora; no Offline, fecha tambem o host local e os servicos."""
+        if self.pid_jogo and imagem_do_pid(self.pid_jogo) == "thedaybefore.exe":
+            matar(self.pid_jogo); self.log("jogo fechado (PID %d)" % self.pid_jogo)
+        if self.proc_cliente and self.proc_cliente.poll() is None:
+            matar(self.proc_cliente.pid)
+        if self.proc_host is not None:
+            self._parar_offline(rapido=rapido)
 
     def _fim(self):
         self.modo = None; self.pid_jogo = None; self.proc_cliente = None; self.parando = False
@@ -458,17 +548,27 @@ class Launcher:
         self.estado("Parando...")
 
         def t():
+            # fecha o jogo e o cliente na hora; o fluxo de jogo (jogar_*) percebe e faz o resto (fecha o host no Offline e volta a Pronto)
             if self.pid_jogo and imagem_do_pid(self.pid_jogo) == "thedaybefore.exe":
-                matar(self.pid_jogo)
+                matar(self.pid_jogo); self.log("jogo fechado (PID %d)" % self.pid_jogo)
             if self.proc_cliente and self.proc_cliente.poll() is None:
-                try: self.proc_cliente.wait(timeout=15)
-                except subprocess.TimeoutExpired: matar(self.proc_cliente.pid)
-            # o fluxo de cada modo (thread de jogar_*) termina sozinho: quando o cliente sai (e fecha o host no Offline), ou, se o
-            # servidor local ainda estava subindo, o laco de espera ve self.parando e desliga tudo
-        threading.Thread(target=t, daemon=True).start()
+                matar(self.proc_cliente.pid)
+            # vigia: se o fluxo de jogo nao voltar sozinho (travado ou morto), encerra tudo e destrava
+            fim = time.time() + 75
+            while self.modo and time.time() < fim:
+                time.sleep(0.5)
+            if self.modo:
+                self.log("o launcher não voltou sozinho: encerrando tudo à força")
+                self._encerrar_processos(rapido=True)
+                self._fim()
+        self._rodar("parar", t, limpar=False)
 
     def abrir_logs(self):
         os.startfile(str(CLIENTE.parent))
+
+    def abrir_log_launcher(self):
+        gravar_log("")
+        os.startfile(str(LOG_LAUNCHER))
 
     def fechar(self):
         if self.modo:
