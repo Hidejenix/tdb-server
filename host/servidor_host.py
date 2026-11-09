@@ -12,7 +12,20 @@ Roda ate o host fechar (ou Ctrl+C). Log: %TEMP%\\servidor_host[_headless].out"""
 import os, sys, time, json, subprocess, socket, shutil, threading, urllib.request
 import frida
 
-JOGO = os.environ.get("TDB_JOGO", r"C:\Games\THE DAY BEFORE")
+def _pasta_jogo():
+    """08/11: TDB_JOGO > pasta escolhida no launcher (launcher\config.json) > padrao."""
+    if os.environ.get("TDB_JOGO"):
+        return os.environ["TDB_JOGO"]
+    try:
+        cfg = json.loads(open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "launcher", "config.json"), encoding="utf-8").read())
+        if cfg.get("pasta_jogo"):
+            return cfg["pasta_jogo"]
+    except Exception:
+        pass
+    return r"C:\Games\THE DAY BEFORE"
+
+
+JOGO = _pasta_jogo()
 WD = os.path.join(JOGO, r"Survival\Binaries\Win64")
 EXE = os.path.join(WD, "TheDayBefore.exe")
 AQUI = os.path.dirname(os.path.abspath(__file__))           # ...\host

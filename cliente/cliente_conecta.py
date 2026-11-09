@@ -29,7 +29,21 @@ import frida
 DIR = Path(__file__).resolve().parent
 JS = DIR / "tdb_connectex_test.js"
 LOG = DIR / ("cliente_frida_%s.log" % (os.environ.get("USERNAME", "") or "cliente").lower())   # um log por conta (2 clientes no mesmo PC)
-JOGO = os.environ.get("TDB_JOGO", r"C:\Games\THE DAY BEFORE")
+def _pasta_jogo():
+    """08/11: TDB_JOGO (o launcher passa) > pasta escolhida no launcher (launcher\config.json) > padrao. Devolve (pasta, origem)."""
+    if os.environ.get("TDB_JOGO"):
+        return os.environ["TDB_JOGO"], "variavel TDB_JOGO"
+    try:
+        import json as _json
+        cfg = _json.loads((Path(__file__).resolve().parent.parent / "launcher" / "config.json").read_text(encoding="utf-8"))
+        if cfg.get("pasta_jogo"):
+            return cfg["pasta_jogo"], "escolhida no launcher (launcher\config.json)"
+    except Exception:
+        pass
+    return r"C:\Games\THE DAY BEFORE", "padrao"
+
+
+JOGO, ORIGEM_JOGO = _pasta_jogo()
 WD = os.path.join(JOGO, r"Survival\Binaries\Win64")
 EXE = os.path.join(WD, "TheDayBefore.exe")
 DIAG = DIR / "diagnostico"
@@ -241,6 +255,10 @@ def main() -> int:
     # 06/11 (modo leve, padrao): so os scripts que mudam o comportamento (redirecionamento do Firestore e do join).
     # Com --diag volta tudo: diagnosticos de UDP/travel/ProcessEvent, monitor do GPS e gRPC em modo debug.
     diag = "--diag" in sys.argv
+    print(f"pasta do jogo: {JOGO} ({ORIGEM_JOGO})", flush=True)
+    if not os.path.isfile(EXE):
+        print(f"ERRO: nao achei o jogo em {EXE}. Escolha a pasta certa no launcher (Escolher...) ou defina TDB_JOGO.", flush=True)
+        return 1
     # Host remoto: --host <IPv4> (ou variavel TDB_HOST). Sem isso, o host e este PC (127.0.0.1).
     host = sys.argv[sys.argv.index("--host") + 1] if "--host" in sys.argv else os.environ.get("TDB_HOST", "")
     # Sem --host/TDB_HOST: usa o IP do arquivo host.txt ao lado deste script (uma linha; apague o arquivo para voltar ao host local).
