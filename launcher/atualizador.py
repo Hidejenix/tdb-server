@@ -27,11 +27,21 @@ ARQ_VERSAO = RAIZ / "launcher" / "versao.txt"
 AGENTE = "tdb-launcher"
 
 
-def url_release(repo: str, nome: str) -> str:
-    # /releases/latest/download/<arquivo> redireciona para o arquivo da release mais recente (nao precisa da API do GitHub)
+def url_release(repo: str, nome: str, versao: str = "") -> str:
+    """Sem versao: /releases/latest/download/<arquivo> (a release mais recente; o GitHub pode demorar alguns minutos para apontar
+    para uma release recem-publicada). Com versao: /releases/download/<versao>/<arquivo> (exatamente aquela release) - o zip e
+    sempre baixado assim, para nunca misturar o manifesto de uma versao com o zip de outra (visto em 08/11)."""
     if repo.startswith("http://") or repo.startswith("https://") or repo.startswith("file:"):
         return repo.rstrip("/") + "/" + nome          # base alternativa (testes, espelho)
+    if versao:
+        return "https://github.com/%s/releases/download/%s/%s" % (repo, versao, nome)
     return "https://github.com/%s/releases/latest/download/%s" % (repo, nome)
+
+
+def chave_versao(v: str) -> tuple:
+    """'2026.11.08-10' -> (2026, 11, 8, 10): compara numeros, nao texto ('-10' > '-2')."""
+    import re
+    return tuple(int(x) for x in re.findall(r"\d+", v or ""))
 
 
 def _contexto_certifi():
@@ -122,15 +132,22 @@ def verificar(repo: str = REPO_PADRAO) -> dict:
     except Exception as e:
         return {"ok": False, "erro": "nao consegui baixar o manifesto (%s)" % e, "pendentes": [], "versao": ""}
     arquivos = man.get("arquivos") or {}
+    remota, local = man.get("versao", "?"), versao_local()
+    if chave_versao(local) and chave_versao(remota) < chave_versao(local):
+        # o "latest" ainda aponta para uma release mais antiga que a instalada (propagacao do GitHub): nunca voltar versao
+        return {"ok": True, "versao": local, "pendentes": [], "manifesto": man, "erro": "", "notas": "",
+                "aviso": "o GitHub ainda aponta para %s (mais antiga que a instalada, %s); nada a fazer" % (remota, local)}
     pendentes = [rel for rel, h in sorted(arquivos.items()) if caminho_ok(rel) and sha256_arquivo(RAIZ / rel) != h]
-    return {"ok": True, "versao": man.get("versao", "?"), "pendentes": pendentes, "manifesto": man, "erro": "",
+    return {"ok": True, "versao": remota, "pendentes": pendentes, "manifesto": man, "erro": "",
             "notas": man.get("notas", "")}
 
 
 def aplicar(info: dict, repo: str = REPO_PADRAO, log=print) -> list:
-    """Baixa o zip da release, confere hashes e grava os arquivos pendentes. Devolve a lista gravada."""
+    """Baixa o zip DA MESMA versao do manifesto, confere hashes e grava os arquivos pendentes. Devolve a lista gravada."""
     man = info["manifesto"]
-    dados = baixar(url_release(repo, man.get("zip", "atualizacao.zip")), timeout=60)
+    if not info.get("pendentes"):
+        return []
+    dados = baixar(url_release(repo, man.get("zip", "atualizacao.zip"), versao=man.get("versao", "")), timeout=60)
     if man.get("zip_sha256") and sha256_bytes(dados) != man["zip_sha256"]:
         raise RuntimeError("o zip baixado nao confere com o manifesto (hash diferente); atualizacao cancelada")
     gravados = []

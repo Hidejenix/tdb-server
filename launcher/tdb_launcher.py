@@ -241,6 +241,8 @@ class Launcher:
             self.log("atualização: " + info["erro"])
             return None
         self.info_atualizacao = info
+        if info.get("aviso"):
+            self.log("atualização: " + info["aviso"])
         if info["pendentes"]:
             self.fila.put(("versao", "Versão: %s  →  atualização disponível: %s (%d arquivo(s))" % (atualizador.versao_local(), info["versao"], len(info["pendentes"]))))
             self.log("atualização %s disponível: %s" % (info["versao"], ", ".join(info["pendentes"][:8]) + (" ..." if len(info["pendentes"]) > 8 else "")))
