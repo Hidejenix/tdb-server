@@ -5,7 +5,7 @@ Online : python cliente\\cliente_conecta.py           (IP em cliente\\host.txt; 
 Offline: python host\\servidor_host.py --appdata-separado  -> espera "[lnat] LISTEN OK" -> python cliente\\cliente_conecta.py --local
          (ID antigo, onde estao os saves locais). Ao fechar o jogo: fecha o host (export final do Firestore) e desliga os servicos
          locais (emulador e terminador TLS na 443), para o modo Online poder abrir a ponte na 443 depois.
-Configuracao opcional: launcher\\config.json  {"repo": "yan1451/tdb-server", "pasta_jogo": "C:\\\\Games\\\\THE DAY BEFORE"}
+Pasta do jogo: escolhida na janela ("Escolher..."), guardada em launcher\\config.json (local; a atualizacao nunca mexe nele).
 """
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ import threading
 import time
 import tkinter as tk
 from pathlib import Path
-from tkinter import messagebox, scrolledtext
+from tkinter import filedialog, messagebox, scrolledtext
 
 AQUI = Path(__file__).resolve().parent
 RAIZ = AQUI.parent
@@ -63,6 +63,27 @@ def ip_servidor() -> str:
         return HOST_TXT.read_text(encoding="utf-8").strip()
     except OSError:
         return ""
+
+
+PASTA_PADRAO = r"C:\Games\THE DAY BEFORE"
+EXE_REL = Path("Survival") / "Binaries" / "Win64" / "TheDayBefore.exe"
+
+
+def raiz_do_jogo(pasta: str):
+    """Aceita a pasta do jogo ou qualquer subpasta dela (ou o proprio .exe) e devolve a raiz (a que tem Survival\Binaries\Win64\
+    TheDayBefore.exe), ou None se nao achar."""
+    if not pasta:
+        return None
+    try:
+        p = Path(pasta).resolve()
+    except OSError:
+        return None
+    if p.is_file():
+        p = p.parent
+    for cand in [p, *p.parents]:
+        if (cand / EXE_REL).is_file():
+            return str(cand)
+    return None
 
 
 def porta_aberta(host: str, porta: int, timeout: float = 3) -> bool:
@@ -146,6 +167,13 @@ class Launcher:
         self.b_atualizar = tk.Button(bot, text="Procurar atualização", command=self.atualizar_manual, **estilo2)
         self.b_atualizar.pack(side="left", padx=8)
         tk.Button(bot, text="Pasta de logs", command=self.abrir_logs, **estilo2).pack(side="left")
+
+        jog = tk.Frame(r, bg=fundo); jog.pack(fill="x", padx=16, pady=(0, 6))
+        tk.Label(jog, text="Pasta do jogo:", bg=fundo, fg=sec, font=("Segoe UI", 10)).pack(side="left")
+        self.lbl_pasta = tk.Label(jog, text="", bg=fundo, fg=texto, font=("Segoe UI", 10), anchor="w")
+        self.lbl_pasta.pack(side="left", padx=(6, 8), fill="x", expand=True)
+        tk.Button(jog, text="Escolher...", command=self.escolher_pasta, **estilo2).pack(side="right")
+        self._mostrar_pasta()
 
         opc = tk.Frame(r, bg=fundo); opc.pack(fill="x", padx=16)
         self.v_barras = tk.BooleanVar(value=self.cfg.get("barras_fixas", True))
@@ -284,9 +312,45 @@ class Launcher:
 
     def _env(self) -> dict:
         env = dict(os.environ)
-        if self.cfg.get("pasta_jogo"):
-            env["TDB_JOGO"] = self.cfg["pasta_jogo"]
+        pasta = self.pasta_jogo()
+        if pasta:
+            env["TDB_JOGO"] = pasta   # lida pelo cliente_conecta.py e pelo servidor_host.py
         return env
+
+    # ------------------------------------------------------------------ pasta do jogo
+    def pasta_jogo(self):
+        """Pasta escolhida (config.json) se for valida; senao a padrao, se existir; senao None."""
+        return raiz_do_jogo(self.cfg.get("pasta_jogo", "")) or raiz_do_jogo(os.environ.get("TDB_JOGO", "")) or raiz_do_jogo(PASTA_PADRAO)
+
+    def _mostrar_pasta(self):
+        p = self.pasta_jogo()
+        if p:
+            self.lbl_pasta.configure(text=p, fg="#e6e6e6")
+        else:
+            self.lbl_pasta.configure(text="não encontrada — clique em Escolher... e aponte a pasta do The Day Before", fg="#e0a050")
+
+    def escolher_pasta(self) -> bool:
+        inicial = self.pasta_jogo() or (str(Path(self.cfg["pasta_jogo"]).parent) if self.cfg.get("pasta_jogo") else "C:\\")
+        escolhida = filedialog.askdirectory(title="Escolha a pasta do The Day Before (a que tem a pasta Survival)", initialdir=inicial,
+                                            mustexist=True, parent=self.r)
+        if not escolhida:
+            return False
+        raiz = raiz_do_jogo(escolhida)
+        if not raiz:
+            messagebox.showerror("TDB Launcher", "Não achei o jogo nessa pasta.\n\nEscolha a pasta do The Day Before: dentro dela deve existir "
+                                 "Survival\\Binaries\\Win64\\TheDayBefore.exe.", parent=self.r)
+            return False
+        self.cfg["pasta_jogo"] = raiz; salvar_cfg(self.cfg)
+        self._mostrar_pasta()
+        self.log("pasta do jogo: " + raiz)
+        return True
+
+    def _conferir_pasta(self) -> bool:
+        """Antes de jogar: exige uma pasta valida (abre o seletor se faltar)."""
+        if self.pasta_jogo():
+            return True
+        messagebox.showinfo("TDB Launcher", "Primeiro escolha onde está instalado o The Day Before.", parent=self.r)
+        return self.escolher_pasta()
 
     def _iniciar_cliente(self, local: bool):
         self.proc_cliente = subprocess.Popen(self._args_cliente(local), cwd=str(CLIENTE.parent), stdout=subprocess.PIPE,
@@ -296,6 +360,8 @@ class Launcher:
     def jogar_online(self):
         if not ip_servidor():
             messagebox.showwarning("TDB Launcher", "Falta o arquivo cliente\\host.txt com o IP do servidor."); return
+        if not self._conferir_pasta():
+            return
         self.modo = "online"; self.fila.put(("botoes", True))
 
         def t():
@@ -313,6 +379,8 @@ class Launcher:
     def jogar_offline(self):
         if not HOST.exists():
             messagebox.showwarning("TDB Launcher", "Não achei host\\servidor_host.py: o modo Offline precisa da pasta do projeto completa."); return
+        if not self._conferir_pasta():
+            return
         self.modo = "offline"; self.fila.put(("botoes", True))
 
         def t():

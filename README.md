@@ -120,6 +120,9 @@ Janela simples (Python + tkinter, nada extra para instalar além do Python com `
   `LISTEN OK` e abre o jogo nele com o ID antigo (`76561197960287930`), onde estão os saves locais. Ao fechar o jogo, fecha o host
   (com o export final do Firestore) e desliga o emulador e o terminador TLS (porta 443), para o modo Online funcionar depois.
 - Mostra se o servidor online está no ar, a versão instalada e a saída do cliente/host; opção "vida, fome e sede sempre visíveis".
+- **Pasta do jogo:** linha "Pasta do jogo" com o botão **Escolher...** (aceita a pasta do jogo ou qualquer subpasta; confere
+  `Survival\Binaries\Win64\TheDayBefore.exe`). Fica em `launcher\config.json` e vale para o cliente e para o host local. Padrão:
+  `C:\Games\THE DAY BEFORE`. Se não achar o jogo, o launcher pede a pasta antes de jogar.
 - **Atualização:** ao abrir e antes de jogar, compara os arquivos com a release mais recente do GitHub
   (`/releases/latest/download/manifesto.json`) e troca só os diferentes, conferindo o SHA-256 de cada arquivo e do zip. Nunca mexe em
   `cliente\host.txt`, `cliente\steamid.txt`, `launcher\config.json` nem nos saves (`servicos\`). Se o próprio launcher mudar, ele reabre.
