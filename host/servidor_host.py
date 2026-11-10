@@ -127,6 +127,20 @@ def definir_identidade(steam_id, nome):
     with open(STEAM_CFG, "w", encoding="ascii", newline="\n") as f: f.write("\n".join(linhas) + "\n")
     log("identidade Steam nos arquivos: %s (%s)" % (steam_id, nome))
 
+def devolver_identidade():
+    """10/11: so devolve o ID do cliente se os arquivos AINDA tem o ID do host. Antes gravava sempre, 30 s depois de abrir: no
+    Offline do launcher o cliente abre logo apos o LISTEN OK (as vezes antes desses 30 s) e grava o proprio ID (ex.: ...287931);
+    o host sobrescrevia com ...287930 um segundo depois e o jogo abria com o ID errado = outro save (visto 10/11 08:58:53/54)."""
+    try:
+        with open(os.path.join(STEAM_ENGINE, "force_steamid.txt"), "rb") as f:
+            atual = f.read().decode("ascii", "replace").strip()
+    except OSError:
+        atual = HOST_STEAM_ID
+    if atual != HOST_STEAM_ID:
+        log("identidade Steam: arquivos ja tem %s (gravado pelo cliente); nao devolvo o ID padrao" % atual)
+        return
+    definir_identidade(CLIENTE_STEAM_ID, CLIENTE_NOME)
+
 _export_lock = threading.Lock()
 
 def exportar(motivo, bloquear=False):
@@ -322,7 +336,7 @@ try:
     while vivo["v"]:
         time.sleep(10)
         if not restaurado and time.time() - inicio >= 30:   # o emulador ja leu o ID do host
-            definir_identidade(CLIENTE_STEAM_ID, CLIENTE_NOME); restaurado = True
+            devolver_identidade(); restaurado = True
         d = ps("Get-NetUDPEndpoint -LocalPort %d -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess" % PORTA)
         if d != ultimo:
             log("porta UDP %d: " % PORTA + (d or "ninguem") + (" (host)" if d.strip() == str(pid) else "")); ultimo = d
@@ -330,7 +344,7 @@ except KeyboardInterrupt:
     log("interrompido (Ctrl+C)")
 finally:
     if not restaurado:
-        try: definir_identidade(CLIENTE_STEAM_ID, CLIENTE_NOME)
+        try: devolver_identidade()
         except Exception as e: log("falha ao devolver a identidade do cliente: %s" % e)
 try: sess.detach()
 except Exception: pass
