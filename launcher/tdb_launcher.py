@@ -35,7 +35,7 @@ HOST = RAIZ / "host" / "servidor_host.py"
 # 10/11: o Offline usa o host_otimizado (replicacao em C, sem o limite de 150 atores sempre relevantes) com os mesmos argumentos
 # da VPS. O host normal (replicacao em JS a cada quadro + monitores) rodava a 9-15 quadros/s com 1 jogador: atraso e itens demorando.
 HOST_OTIM = RAIZ / "host_otimizado" / "servidor_host.py"
-ARGS_HOST_OFFLINE = ["--appdata-separado", "--sem-monitores", "--sem-resgate"]
+ARGS_HOST_OFFLINE = ["--appdata-separado", "--sem-monitores"]   # 10/11: resgate de queda (resgate_queda.js) ligado dentro do host
 HOST_TXT = RAIZ / "cliente" / "host.txt"
 LOG_HOST = Path(os.environ.get("TEMP", ".")) / "servidor_host_headless.out"
 SEM_JANELA = getattr(subprocess, "CREATE_NO_WINDOW", 0)

@@ -330,7 +330,7 @@ def t_subir(versao, enviar):
             log("a VM nao esta ligada: ligue a VM primeiro"); return False
         if enviar and not enviar_scripts(log): return False
         log("subindo o servidor (%s)... leva de 2 a 4 minutos" % versao)
-        cod, out = ssh("cd %s && TDB_HOST_PASTA=%s TDB_HOST_ARGS='--sem-monitores --sem-resgate' bash linux/subir_tudo.sh"
+        cod, out = ssh("cd %s && TDB_HOST_PASTA=%s TDB_HOST_ARGS='--sem-monitores' bash linux/subir_tudo.sh"
                        % (cfg["pasta_remota"], versao), timeout=600, linha=log)
         if cod != 0 or "PRONTO" not in out: return False
         for mid in list(cfg["monitores_ligados"]):

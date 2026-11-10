@@ -8,5 +8,9 @@
   "pasta_remota": "~/tdb/servidor",
   "versao": "host_otimizado",
   "enviar_scripts": true,
-  "monitores_ligados": ["monitor_ping", "monitor_posicao", "resgate_queda", "monitor_bugs"]
+  "monitores_ligados": [
+    "monitor_ping",
+    "monitor_posicao",
+    "monitor_bugs"
+  ]
 }
