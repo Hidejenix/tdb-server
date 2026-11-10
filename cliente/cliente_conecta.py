@@ -303,6 +303,8 @@ def main() -> int:
     # Necessarios: tdb_connectex_test.js (Firestore/lista -> terminador TLS local) e tdb_fname_join.js (join -> 127.0.0.1:7777).
     # Diagnosticos (so com --diag): tdb_join_udp.js, tdb_travel_log.js, tdb_pe_travel.js (hook em ProcessEvent).
     partes = [JS, DIR / "tdb_fname_join.js"]
+    if host and (DIR / "redireciona_join.js").exists():   # 10/11: join sempre para o host.txt, mesmo com lista de servidores velha
+        partes.append(DIR / "redireciona_join.js")
     if diag:
         partes += [DIAG / "tdb_join_udp.js", DIAG / "tdb_travel_log.js", DIAG / "tdb_pe_travel.js"]
     source = "\n".join(p.read_text(encoding="utf-8") for p in partes)

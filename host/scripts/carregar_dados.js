@@ -62,14 +62,46 @@ setInterval(function () {
       if (pc.add(OFF_COMPLETO).readU8() !== 0) { feitos.add(k); continue; }   // o jogo ja carregou sozinho
       if (!vistoEm.has(k)) { vistoEm.set(k, { t: agora }); continue; }
       if (agora - vistoEm.get(k).t < 2000) continue;
-      if (fLoad === null) { fLoad = acharFuncao(pc, 'LoadUserInfo'); log(fLoad.isNull() ? 'ERRO: SurvPC.LoadUserInfo nao achada' : 'LoadUserInfo ' + fLoad); }
+      if (fLoad === null) {
+        fLoad = acharFuncao(pc, 'LoadUserInfo'); log(fLoad.isNull() ? 'ERRO: SurvPC.LoadUserInfo nao achada' : 'LoadUserInfo ' + fLoad);
+        const fGot = acharFuncao(pc, 'OnGot_F36A4BC64657E2B0074D619D06EC5286'), fErr = acharFuncao(pc, 'OnError_F36A4BC64657E2B0074D619D06EC5286');
+        alvosResp.writePointer(fGot); alvosResp.add(8).writePointer(fErr); fGotPtr = fGot;
+      }
       if (fLoad.isNull()) continue;
-      feitos.add(k); fila.push([pc, sid]); pendente.writeS32(1);
+      feitos.add(k); tentativas.set(k, 1); fila.push([pc, sid]); pendente.writeS32(1);
     }
   } catch (e) { log('erro: ' + e); }
 }, 1000);
 
 const pendente = Memory.alloc(8); pendente.writeS32(0);
+// 10/11 19:2x (VPS, medido): a conexao do host com o Firestore morre quando fica parada; a 1a leitura depois da pausa espera ~35 s e
+// volta com OnError (e so entao o host reconecta); a seguinte volta em ~33 ms. Entao: se vier OnError, pede de novo na hora (ate 5x).
+const alvosResp = Memory.alloc(16); alvosResp.writePointer(ptr(0)); alvosResp.add(8).writePointer(ptr(0));
+let fGotPtr = ptr(0);
+const tentativas = new Map();
+const resposta = new NativeCallback(function (obj, f) {
+  try {
+    const k = obj.toString(), v = vistoEm.get(k) || {}, ms = v.chamado ? Date.now() - v.chamado : -1;
+    const sid = fstr(obj.add(OFF_STEAMID));
+    if (f.equals(fGotPtr)) { log('resposta OK para ' + sid + ' em ' + ms + ' ms (tentativa ' + (tentativas.get(k) || 0) + ')'); return; }
+    const n = (tentativas.get(k) || 0);
+    if (n >= 5) { log('ERRO de leitura para ' + sid + ' depois de ' + n + ' tentativas; desisto'); return; }
+    tentativas.set(k, n + 1);
+    log('ERRO de leitura para ' + sid + ' em ' + ms + ' ms (conexao velha com o banco); pedindo de novo (tentativa ' + (n + 1) + ')');
+    fila.push([obj, sid]); pendente.writeS32(1);
+  } catch (e) { log('erro na resposta: ' + e); }
+}, 'void', ['pointer', 'pointer']);
+const cmResp = new CModule(`
+#include <gum/guminterceptor.h>
+extern void resposta (void * obj, void * f);
+extern void * alvosResp[2];
+void onEnter (GumInvocationContext * ic)
+{
+  void * f = gum_invocation_context_get_nth_argument (ic, 1);
+  if (f != 0 && (f == alvosResp[0] || f == alvosResp[1])) resposta (gum_invocation_context_get_nth_argument (ic, 0), f);
+}
+`, { resposta, alvosResp });
+Interceptor.attach(B.add(0x24077b0), cmResp);
 const chamar = new NativeCallback(function () {
   try {
     while (fila.length) {

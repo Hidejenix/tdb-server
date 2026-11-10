@@ -67,8 +67,7 @@ if "--sem-resgate" not in sys.argv:
 APPDATA_SEPARADO = ("--appdata-separado" in sys.argv) or PORTA != 7777
 # 10/11 18:3x: carregar_dados.js so no Offline (host e cliente no mesmo PC). Na VPS o jogo ja carregava os dados sozinho e a
 # chamada extra chegou DEPOIS do spawn -> teleporte para a posicao salva -> jogador no limbo (visto 18:29-18:34).
-if not APPDATA_SEPARADO and "carregar_dados.js" in SCRIPTS:
-    SCRIPTS.remove("carregar_dados.js")
+# 10/11 19:3x: volta a rodar tambem na VPS (agora pede de novo quando a 1a leitura falha por conexao velha com o banco).
 # 10/11 13:1x: a pasta do host SAIU de %LOCALAPPDATA%. O app do Claude (MSIX) virtualiza AppData\Local para os processos que ele
 # abre: as gravacoes iam para AppData\Local\Packages\Claude_*\LocalCache, mas a exclusao de arquivos antigos atingia a pasta real ->
 # o banco local do Firestore REAL ficou com CURRENT apontando para um MANIFEST apagado ("Corruption: CURRENT points to a non-existent
