@@ -68,10 +68,111 @@ if "--sem-resgate" not in sys.argv:
 # LocalAppData proprio (06/11): na porta de teste (ou com --appdata-separado) a instancia usa outra pasta LocalAppData, porque o banco
 # local do Firestore (LevelDB com LOCK) em %LOCALAPPDATA%\firestore so abre em um processo por usuario (a 2a instancia caia).
 APPDATA_SEPARADO = ("--appdata-separado" in sys.argv) or PORTA != 7777
-APPDATA_DIR = os.path.join(os.environ["LOCALAPPDATA"], "TDB_instancia_%d" % PORTA)
+# 10/11 18:3x: carregar_dados.js so no Offline (host e cliente no mesmo PC). Na VPS o jogo ja carregava os dados sozinho e a
+# chamada extra chegou DEPOIS do spawn -> teleporte para a posicao salva -> jogador no limbo (visto 18:29-18:34).
+if not APPDATA_SEPARADO and "carregar_dados.js" in SCRIPTS:
+    SCRIPTS.remove("carregar_dados.js")
+# 10/11 13:1x: a pasta do host SAIU de %LOCALAPPDATA%. O app do Claude (MSIX) virtualiza AppData\Local para os processos que ele
+# abre: as gravacoes iam para AppData\Local\Packages\Claude_*\LocalCache, mas a exclusao de arquivos antigos atingia a pasta real ->
+# o banco local do Firestore REAL ficou com CURRENT apontando para um MANIFEST apagado ("Corruption: CURRENT points to a non-existent
+# file") e o Offline pelo launcher caia ~4 s depois do menu. Na pasta do projeto (servicos\) todo mundo enxerga os mesmos arquivos.
+APPDATA_DIR = os.path.join(SERVICOS, "appdata_host_%d" % PORTA)
+def _banco_corrompido_de_lado(pasta):
+    """Se o CURRENT do banco local do Firestore aponta para um MANIFEST que nao existe, move o banco de lado (o jogo cria outro;
+    os saves ficam no emulador, nao nesse cache)."""
+    main = os.path.join(pasta, "firestore", "__FIRAPP_DEFAULT", "the-day-before-8f438", "main")
+    try:
+        cur = open(os.path.join(main, "CURRENT"), encoding="ascii", errors="replace").read().strip()
+    except OSError:
+        return
+    if cur and os.path.exists(os.path.join(main, cur)):
+        return
+    destino = main + "_corrompido_" + time.strftime("%Y%m%d_%H%M%S")
+    try:
+        os.rename(main, destino)
+        print(time.strftime("%H:%M:%S ") + "[lock] banco local CORROMPIDO (CURRENT -> %s, que nao existe): movido para %s" % (cur, destino), flush=True)
+    except OSError as e:
+        print(time.strftime("%H:%M:%S ") + "[lock] banco local corrompido e nao consegui mover: %s" % e, flush=True)
+
+def _lock_firestore_livre(pasta):
+    """True se o LOCK do banco local do Firestore (LevelDB) desta pasta pode ser aberto sem compartilhamento (ninguem segura)."""
+    import ctypes
+    from ctypes import wintypes
+    lock = os.path.join(pasta, "firestore", "__FIRAPP_DEFAULT", "the-day-before-8f438", "main", "LOCK")
+    if not os.path.exists(lock):
+        return True
+    k = ctypes.WinDLL("kernel32", use_last_error=True)
+    k.CreateFileW.restype = wintypes.HANDLE
+    h = k.CreateFileW(lock, 0x80000000, 0, None, 3, 0, None)
+    if h == wintypes.HANDLE(-1).value:
+        return False
+    k.CloseHandle(h)
+    return True
+def _quem_segura(pasta):
+    """Processos que estao com os arquivos do banco local do Firestore abertos (API Restart Manager do Windows)."""
+    try:
+        import ctypes
+        from ctypes import wintypes
+        main = os.path.join(pasta, "firestore", "__FIRAPP_DEFAULT", "the-day-before-8f438", "main")
+        if not os.path.isdir(main):
+            return "pasta do banco ainda nao existe"
+        arqs = [os.path.join(main, n) for n in os.listdir(main)]
+        rm = ctypes.WinDLL("rstrtmgr")
+        class UNIQ(ctypes.Structure): _fields_ = [("pid", wintypes.DWORD), ("t", wintypes.FILETIME)]
+        class INFO(ctypes.Structure):
+            _fields_ = [("p", UNIQ), ("app", ctypes.c_wchar * 256), ("svc", ctypes.c_wchar * 64), ("tipo", ctypes.c_int),
+                        ("st", wintypes.DWORD), ("sess", wintypes.DWORD), ("rest", wintypes.BOOL)]
+        h = wintypes.DWORD(); chave = ctypes.create_unicode_buffer(64)
+        if rm.RmStartSession(ctypes.byref(h), 0, chave):
+            return "RmStartSession falhou"
+        try:
+            lst = (ctypes.c_wchar_p * len(arqs))(*arqs)
+            rm.RmRegisterResources(h, len(arqs), lst, 0, None, 0, None)
+            prec, n, mot = wintypes.UINT(0), wintypes.UINT(0), wintypes.DWORD()
+            rm.RmGetList(h, ctypes.byref(prec), ctypes.byref(n), None, ctypes.byref(mot))
+            if prec.value == 0:
+                return "ninguem"
+            n.value = prec.value; buf = (INFO * prec.value)()
+            rm.RmGetList(h, ctypes.byref(prec), ctypes.byref(n), buf, ctypes.byref(mot))
+            return ", ".join("%s (PID %d)" % (buf[i].app, buf[i].p.pid) for i in range(n.value))
+        finally:
+            rm.RmEndSession(h)
+    except Exception as e:
+        return "? (%s)" % e
+def _jogos_abertos():
+    try:
+        r = subprocess.run(["tasklist", "/FO", "CSV", "/NH", "/FI", "IMAGENAME eq TheDayBefore.exe"], capture_output=True, text=True, encoding="oem", errors="replace",   # 10/11: Windows em russo (cp866)
+                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).stdout.strip()
+        return ", ".join("PID " + l.split('","')[1] for l in r.splitlines() if l.startswith('"')) or "nenhum"
+    except Exception as e:
+        return "? (%s)" % e
+# 10/11: o Offline pelo launcher caia ~4 s depois do menu com "FIRESTORE INTERNAL ASSERTION FAILED ... FirestoreClient::Initialize"
+# (0xe06d7363): o banco local do Firestore desta pasta ainda estava aberto por um processo do jogo da subida anterior (o launcher
+# encerra o host com taskkill /T /F; uma queda fica presa no WER). Reproduzido segurando o LOCK (12:45). Espera ate 30 s o LOCK ficar
+# livre; se nao ficar, usa uma pasta nova so nesta subida (o cache local do host nao e a fonte dos saves: eles ficam no emulador).
+if APPDATA_SEPARADO and os.name == "nt":
+    _banco_corrompido_de_lado(APPDATA_DIR)
+    print(time.strftime("%H:%M:%S ") + "[lock] jogos abertos antes de subir: " + _jogos_abertos(), flush=True)
+    print(time.strftime("%H:%M:%S ") + "[lock] arquivos do banco abertos por: " + _quem_segura(APPDATA_DIR), flush=True)
+    def _vigia_lock(t0=time.time()):   # 10/11: a queda vem ~9 s depois de abrir o jogo: quem segura o banco nessa janela
+        for _s in (14, 17, 20, 23, 26):
+            time.sleep(max(0, t0 + _s - time.time()))
+            print(time.strftime("%H:%M:%S ") + "[lock] +%d s: banco aberto por: %s | jogos: %s" % (_s, _quem_segura(APPDATA_DIR), _jogos_abertos()), flush=True)
+    threading.Thread(target=_vigia_lock, daemon=True).start()
+    for _i in range(30):
+        if _lock_firestore_livre(APPDATA_DIR):
+            if _i:
+                print(time.strftime("%H:%M:%S ") + "[lock] liberado depois de %d s" % _i, flush=True)
+            break
+        if _i == 0:
+            print(time.strftime("%H:%M:%S ") + "[lock] banco local do Firestore EM USO em " + APPDATA_DIR + "; esperando liberar (ate 30 s)", flush=True)
+        time.sleep(1)
+    else:
+        APPDATA_DIR = APPDATA_DIR + "_" + time.strftime("%Y%m%d_%H%M%S")
+        print(time.strftime("%H:%M:%S ") + "[lock] continuou em uso (jogos: " + _jogos_abertos() + "): esta subida usa a pasta nova " + APPDATA_DIR, flush=True)
 if APPDATA_SEPARADO:
     SCRIPTS.insert(0, "appdata_separado.js")
-if "--diag-excecao" in sys.argv:   # 06/11: registra excecoes C++ (tipo, what, backtrace) - investigacao da 2a instancia
+if "--sem-diag-excecao" not in sys.argv:   # 10/11: LIGADO SEMPRE (so leitura) - Offline caia com 0xe06d7363 no menu so pelo launcher. 06/11: registra excecoes C++ (tipo, what, backtrace) - investigacao da 2a instancia
     SCRIPTS.insert(0, "captura_excecao.js")
 # F8 automatico (--sem-interface): feito DENTRO do host_flow_servidor.js (autoF8Tick, ativado por `var AUTO_F8_MS`).
 # O auto_f8.js (hook externo em GetAsyncKeyState) NAO funciona carregado por este runner: 0 leituras vistas, mesmo numa
