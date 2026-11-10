@@ -6,7 +6,8 @@
 // etapa padrao "DoctorSequence") -> ponto ForBeginner (sala do doutor) e o tutorial recomeca, gravando a sala como posicao.
 // Prova: chamar LoadUserInfo a mao (11:19:26) carregou completo=1 e a posicao salva em 1 s (OnGot_F36A).
 // Correcao: para cada SurvPC de jogador (Steam_Id preenchido, diferente do host) ainda sem dados (TutorialCompleted=0), chama
-// LoadUserInfo uma vez, 2 s depois de o Steam_Id aparecer (bem antes do spawn, que vem ~50 s depois). Na thread do jogo (TickFlush).
+// LoadUserInfo uma vez, 2 s depois de o Steam_Id aparecer (bem antes do spawn, que vem ~50 s depois). Na thread do jogo (TickFlush,
+// gancho em C que so chama o JS quando ha pedido). Jogadores: pelas conexoes do NetDriver, sem varrer a GObjects.
 // Personagem novo (sem "char" no save) segue o fluxo normal do jogo: a leitura nao acha nada e ele continua iniciante. Prefixo [dados].
 (function () {
 'use strict';
@@ -31,13 +32,14 @@ function acharFuncao(o, alvo) {
   for (let n = 0; n < 4 && !cls.isNull(); n++) { let x = cls.add(0x48).readPointer(); for (let k = 0; k < 3000 && !x.isNull(); k++) { if (nome(x) === alvo) return x; x = x.add(0x28).readPointer(); } cls = cls.add(0x40).readPointer(); }
   return ptr(0);
 }
-function pcs() {
-  const g = B.add(0x7ccda10), objs = g.readPointer(), num = g.add(0x14).readS32(), nch = g.add(0x1c).readS32(); const r = [];
-  for (let i = 0; i < num; i++) {
-    const ch = (i / 0x10000) | 0; if (ch >= nch) break;
-    try { const it = objs.add(ch * 8).readPointer().add((i % 0x10000) * 0x18); const o = it.readPointer(); if (o.isNull()) continue; if (it.add(8).readS32() & MORTO) continue;
-          if (classe(o) === 'SurvPC_C' && nome(o).indexOf('Default__') !== 0) r.push(o); } catch (e) {}
-  }
+function pcs() {   // PCs dos clientes conectados, pelas conexoes do NetDriver (barato; NAO varre a GObjects)
+  const r = [];
+  try {
+    const eng = B.add(0x7e20ea8).readPointer(); const w = eng.add(0xec0).readPointer().readPointer().add(0x2c0).readPointer();
+    const d = w.add(0x38).readPointer(); if (d.isNull()) return r;
+    const conns = d.add(0xa0).readPointer(), nc = d.add(0xa8).readS32();
+    for (let i = 0; i < nc && i < 64; i++) { const pc = conns.add(i * 8).readPointer().add(0x30).readPointer(); if (!pc.isNull() && classe(pc) === 'SurvPC_C') r.push(pc); }
+  } catch (e) {}
   return r;
 }
 
@@ -62,23 +64,33 @@ setInterval(function () {
       if (agora - vistoEm.get(k).t < 2000) continue;
       if (fLoad === null) { fLoad = acharFuncao(pc, 'LoadUserInfo'); log(fLoad.isNull() ? 'ERRO: SurvPC.LoadUserInfo nao achada' : 'LoadUserInfo ' + fLoad); }
       if (fLoad.isNull()) continue;
-      feitos.add(k); fila.push([pc, sid]);
+      feitos.add(k); fila.push([pc, sid]); pendente.writeS32(1);
     }
   } catch (e) { log('erro: ' + e); }
 }, 1000);
 
-Interceptor.attach(B.add(0x42f3650), {
-  onEnter() {
-    if (!fila.length) return;
-    const [pc, sid] = fila.shift();
-    try {
-      if (classe(pc) !== 'SurvPC_C') return;    // saiu antes
+const pendente = Memory.alloc(8); pendente.writeS32(0);
+const chamar = new NativeCallback(function () {
+  try {
+    while (fila.length) {
+      const [pc, sid] = fila.shift();
+      if (classe(pc) !== 'SurvPC_C') continue;    // saiu antes
       parms.writeByteArray(new Array(64).fill(0));
       processEvent(pc, fLoad, parms);
       const v = vistoEm.get(pc.toString()) || {}; v.chamado = Date.now(); v.conferir = true; vistoEm.set(pc.toString(), v);
       log('LoadUserInfo chamado para ' + sid + ' (carrega tutorial e posicao salva antes do spawn)');
-    } catch (e) { log('erro chamando LoadUserInfo: ' + e); }
-  }
-});
+    }
+  } catch (e) { log('erro chamando LoadUserInfo: ' + e); }
+  pendente.writeS32(0);
+}, 'void', []);
+// 10/11 11:3x: a 1a versao (JS a cada quadro + varredura da GObjects a cada 1 s) travou o host na subida: o gancho da thread do
+// jogo esperava a trava do JS durante a varredura. Agora o gancho e em C e so chama o JS quando ha pedido na fila.
+const cm = new CModule(`
+#include <gum/guminterceptor.h>
+extern void chamar (void);
+extern int pendente;
+void onEnter (GumInvocationContext * ic) { if (pendente) chamar (); }
+`, { chamar, pendente });
+Interceptor.attach(B.add(0x42f3650), cm);
 log('pronto: carrega os dados do personagem (LoadUserInfo) de quem entra');
 })();

@@ -54,6 +54,9 @@ function revisar() {
   } catch (e) { log('erro: ' + e); }
 }
 revisar();
-setInterval(revisar, 10000);
+// 10/11: varre a GObjects (pesado) a cada 10 s so nos 5 primeiros minutos (o GameMode e recriado na viagem para o mapa do jogo);
+// depois, a cada 2 min.
+const inicio = Date.now();
+(function laco() { revisar(); setTimeout(laco, (Date.now() - inicio < 300000) ? 10000 : 120000); })();
 log('pronto: contador de ID dos itens comeca de ' + semente() + ' (antes: 0 a cada subida do servidor)');
 })();

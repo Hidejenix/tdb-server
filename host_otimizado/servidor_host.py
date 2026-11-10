@@ -50,7 +50,6 @@ SCRIPTS = ["ssl_unpin.js", "tdb_connectex_test.js", "fake_server_join.js", "host
            "reaplicar_aparencia.js",
            "quest_fix.js",
            "id_unico.js",
-           "spawn_trace.js",
            "carregar_dados.js"]   # 10/11: chama SurvPC.LoadUserInfo (sem isso o jogador nasce na sala do doutor)
 #   # 10/11: so leitura - registra tutorial/posicao salva (bug de nascer na sala do doutor)
 #   # 10/11: contador de ID dos itens nao recomeca de 0 (itens sumindo do bau por ID repetido)
