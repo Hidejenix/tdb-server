@@ -21,7 +21,7 @@ from pathlib import Path
 
 RAIZ = Path(__file__).resolve().parent.parent          # pasta do projeto (tem cliente\, host\, launcher\, servicos\)
 REPO_PADRAO = "yan1451/tdb-server"
-PREFIXOS_PERMITIDOS = ("cliente/", "launcher/", "host/")
+PREFIXOS_PERMITIDOS = ("cliente/", "launcher/", "host/", "host_otimizado/")   # 10/11: Offline usa o host_otimizado
 PROTEGIDOS = {"cliente/host.txt", "cliente/steamid.txt", "launcher/config.json", "launcher/versao.txt"}
 ARQ_VERSAO = RAIZ / "launcher" / "versao.txt"
 AGENTE = "tdb-launcher"

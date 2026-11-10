@@ -27,7 +27,10 @@ sys.path.insert(0, str(RAIZ / "launcher"))
 from atualizador import PROTEGIDOS, caminho_ok  # noqa: E402
 
 PADROES = ["cliente/*.py", "cliente/*.js", "launcher/*.py", "launcher/*.bat", "host/servidor_host.py",
-           "host/carregar_script_no_host.py", "host/scripts/*.js", "host/ferramentas/*.js"]
+           "host/carregar_script_no_host.py", "host/scripts/*.js", "host/ferramentas/*.js",
+           # 10/11: o Offline do launcher usa o host_otimizado (o mesmo da VPS)
+           "host_otimizado/servidor_host.py", "host_otimizado/carregar_script_no_host.py", "host_otimizado/scripts/*.js",
+           "host_otimizado/ferramentas/*.js"]
 FORA = {"launcher/publicar_versao.py"}   # ferramenta do dono, nao precisa ir para os jogadores
 
 
