@@ -27,6 +27,7 @@ AQUI = Path(__file__).resolve().parent
 RAIZ = AQUI.parent
 sys.path.insert(0, str(AQUI))
 import atualizador  # noqa: E402
+import idiomas  # noqa: E402
 
 CFG_ARQ = AQUI / "config.json"
 CLIENTE = RAIZ / "cliente" / "cliente_conecta.py"
@@ -164,6 +165,10 @@ class Launcher:
     def __init__(self, raiz: tk.Tk):
         self.r = raiz
         self.cfg = ler_cfg()
+        self.idioma = self.cfg.get("idioma") if self.cfg.get("idioma") in idiomas.CODIGOS else idiomas.detectar()
+        # ultimo texto (chave + valores) de cada rotulo que muda sozinho: permite repintar ao trocar de idioma
+        self._ult = {"estado": ("estado_pronto", {}), "servidor": ("srv_verificando", {}),
+                     "versao": ("versao", {"v": atualizador.versao_local()})}
         self.repo = self.cfg.get("repo", atualizador.REPO_PADRAO)
         self.fila = queue.Queue()
         self.proc_cliente = None
@@ -174,7 +179,7 @@ class Launcher:
         self.parando = False
         self._montar()
         self.r.after(100, self._drenar)
-        raiz.report_callback_exception = lambda tp, ex, tb: self.erro("erro na janela", ex)
+        raiz.report_callback_exception = lambda tp, ex, tb: self.erro("err_janela", ex)
         threading.Thread(target=self._checar_servidor_laco, daemon=True).start()
         self._rodar("verificar atualizacao", self._checar_atualizacao, limpar=False)
         self._rodar("diagnostico", self._diagnostico, limpar=False)
@@ -187,39 +192,54 @@ class Launcher:
         r.minsize(620, 420)
         fundo, texto, sec = "#15181d", "#e6e6e6", "#9aa3ad"
         r.configure(bg=fundo)
-        tk.Label(r, text="The Day Before — servidor da comunidade", bg=fundo, fg=texto, font=("Segoe UI", 15, "bold")).pack(anchor="w", padx=16, pady=(14, 2))
+        self.w_titulo = tk.Label(r, text=self.t("titulo"), bg=fundo, fg=texto, font=("Segoe UI", 15, "bold"))
+        self.w_titulo.pack(anchor="w", padx=16, pady=(14, 2))
         info = tk.Frame(r, bg=fundo); info.pack(fill="x", padx=16)
-        self.lbl_servidor = tk.Label(info, text="Servidor online: verificando...", bg=fundo, fg=sec, font=("Segoe UI", 10))
+        self.lbl_servidor = tk.Label(info, text=self.t("srv_verificando"), bg=fundo, fg=sec, font=("Segoe UI", 10))
         self.lbl_servidor.grid(row=0, column=0, sticky="w")
-        self.lbl_versao = tk.Label(info, text="Versão: " + atualizador.versao_local(), bg=fundo, fg=sec, font=("Segoe UI", 10))
+        self.lbl_versao = tk.Label(info, text=self.t("versao", v=atualizador.versao_local()), bg=fundo, fg=sec, font=("Segoe UI", 10))
         self.lbl_versao.grid(row=1, column=0, sticky="w")
-        self.lbl_estado = tk.Label(info, text="Pronto.", bg=fundo, fg=texto, font=("Segoe UI", 10, "bold"))
+        self.lbl_estado = tk.Label(info, text=self.t("estado_pronto"), bg=fundo, fg=texto, font=("Segoe UI", 10, "bold"))
         self.lbl_estado.grid(row=2, column=0, sticky="w", pady=(4, 0))
+
+        info.columnconfigure(0, weight=1)
+        self.lbl_idioma = tk.Label(info, text=self.t("idioma"), bg=fundo, fg=sec, font=("Segoe UI", 10))
+        self.lbl_idioma.grid(row=0, column=1, sticky="e", padx=(0, 6))
+        self.v_idioma = tk.StringVar(value=idiomas.NOMES[self.idioma])
+        menu = tk.OptionMenu(info, self.v_idioma, *idiomas.NOMES.values(), command=self._trocar_idioma)
+        menu.configure(bg="#2a2f37", fg=texto, activebackground="#363c46", activeforeground=texto, relief="flat", highlightthickness=0,
+                       bd=0, font=("Segoe UI", 10), cursor="hand2")
+        menu["menu"].configure(bg="#2a2f37", fg=texto, activebackground="#363c46", activeforeground=texto, font=("Segoe UI", 10))
+        menu.grid(row=0, column=2, sticky="e")
 
         bot = tk.Frame(r, bg=fundo); bot.pack(fill="x", padx=16, pady=10)
         estilo = dict(font=("Segoe UI", 11, "bold"), relief="flat", padx=14, pady=8, cursor="hand2", bd=0)
-        self.b_online = tk.Button(bot, text="Jogar Online", bg="#2f7d4f", fg="white", activebackground="#3a9a61", command=self.jogar_online, **estilo)
+        self.b_online = tk.Button(bot, text=self.t("b_online"), bg="#2f7d4f", fg="white", activebackground="#3a9a61", command=self.jogar_online, **estilo)
         self.b_online.pack(side="left")
-        self.b_offline = tk.Button(bot, text="Jogar Offline", bg="#3b5b8a", fg="white", activebackground="#4a70a8", command=self.jogar_offline, **estilo)
+        self.b_offline = tk.Button(bot, text=self.t("b_offline"), bg="#3b5b8a", fg="white", activebackground="#4a70a8", command=self.jogar_offline, **estilo)
         self.b_offline.pack(side="left", padx=8)
         estilo2 = dict(font=("Segoe UI", 10), relief="flat", padx=10, pady=8, cursor="hand2", bd=0, bg="#2a2f37", fg=texto, activebackground="#363c46")
-        self.b_parar = tk.Button(bot, text="Parar", command=self.parar, state="disabled", **estilo2)
+        self.b_parar = tk.Button(bot, text=self.t("b_parar"), command=self.parar, state="disabled", **estilo2)
         self.b_parar.pack(side="left")
-        self.b_atualizar = tk.Button(bot, text="Procurar atualização", command=self.atualizar_manual, **estilo2)
+        self.b_atualizar = tk.Button(bot, text=self.t("b_atualizar"), command=self.atualizar_manual, **estilo2)
         self.b_atualizar.pack(side="left", padx=8)
-        tk.Button(bot, text="Log do launcher", command=self.abrir_log_launcher, **estilo2).pack(side="left")
+        self.b_log = tk.Button(bot, text=self.t("b_log"), command=self.abrir_log_launcher, **estilo2)
+        self.b_log.pack(side="left")
 
         jog = tk.Frame(r, bg=fundo); jog.pack(fill="x", padx=16, pady=(0, 6))
-        tk.Label(jog, text="Pasta do jogo:", bg=fundo, fg=sec, font=("Segoe UI", 10)).pack(side="left")
+        self.w_pasta = tk.Label(jog, text=self.t("w_pasta"), bg=fundo, fg=sec, font=("Segoe UI", 10))
+        self.w_pasta.pack(side="left")
         self.lbl_pasta = tk.Label(jog, text="", bg=fundo, fg=texto, font=("Segoe UI", 10), anchor="w")
         self.lbl_pasta.pack(side="left", padx=(6, 8), fill="x", expand=True)
-        tk.Button(jog, text="Escolher...", command=self.escolher_pasta, **estilo2).pack(side="right")
+        self.b_escolher = tk.Button(jog, text=self.t("b_escolher"), command=self.escolher_pasta, **estilo2)
+        self.b_escolher.pack(side="right")
         self._mostrar_pasta()
 
         opc = tk.Frame(r, bg=fundo); opc.pack(fill="x", padx=16)
         self.v_barras = tk.BooleanVar(value=self.cfg.get("barras_fixas", True))
-        tk.Checkbutton(opc, text="Vida, fome e sede sempre visíveis", variable=self.v_barras, bg=fundo, fg=sec, selectcolor="#2a2f37",
-                       activebackground=fundo, activeforeground=texto, command=self._salvar_opcoes).pack(side="left")
+        self.chk_barras = tk.Checkbutton(opc, text=self.t("chk_barras"), variable=self.v_barras, bg=fundo, fg=sec, selectcolor="#2a2f37",
+                                         activebackground=fundo, activeforeground=texto, command=self._salvar_opcoes)
+        self.chk_barras.pack(side="left")
 
         self.txt = scrolledtext.ScrolledText(r, bg="#0e1013", fg="#cfd6dd", insertbackground="white", font=("Consolas", 9), relief="flat", height=14)
         self.txt.pack(fill="both", expand=True, padx=16, pady=(8, 14))
@@ -229,31 +249,68 @@ class Launcher:
     def _diagnostico(self):
         py = python_console()
         gravar_log("=" * 60)
-        self.log("launcher %s | Python %s (%s) | pasta do jogo: %s" % (atualizador.versao_local(), sys.version.split()[0], py,
-                                                                     self.pasta_jogo() or "NAO ENCONTRADA"))
+        self.logk("diag", v=atualizador.versao_local(), py_ver=sys.version.split()[0], py=py, pasta=self.pasta_jogo() or "-")
         v = frida_instalado(py)
         if v:
-            self.log("frida %s instalado" % v)
+            self.logk("frida_ok", v=v)
         else:
-            self.log("ERRO: o pacote frida NAO esta instalado neste Python. O jogo nao abre sem ele.")
-            self.fila.put(("aviso", "O Frida não está instalado no Python deste PC (%s).\n\nAbra o Prompt de Comando e rode:\n"
-                                    "    pip install frida frida-tools\n\nDepois abra o launcher de novo." % py))
+            self.logk("frida_falta")
+            self.fila.put(("aviso", self.t("dlg_frida", py=py)))
 
     def _salvar_opcoes(self):
         self.cfg["barras_fixas"] = bool(self.v_barras.get()); salvar_cfg(self.cfg)
+
+    def t(self, chave: str, **kw) -> str:
+        return idiomas.tr(self.idioma, chave, **kw)
 
     def log(self, msg: str):
         linha = time.strftime("%H:%M:%S ") + msg
         gravar_log(linha)
         self.fila.put(("log", linha))
 
-    def erro(self, titulo: str, exc: BaseException = None):
+    def logk(self, chave: str, **kw):
+        """Mensagem do launcher: na janela, no idioma escolhido; no launcher.log, sempre em portugues (o dono le esse arquivo)."""
+        hora = time.strftime("%H:%M:%S ")
+        gravar_log(hora + idiomas.tr("pt", chave, **kw))
+        self.fila.put(("log", hora + self.t(chave, **kw)))
+
+    def erro(self, chave: str, exc: BaseException = None, **kw):
         """Registra um erro com o traceback completo (janela + launcher.log) e mostra um aviso."""
         detalhe = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)) if exc else ""
-        self.log("ERRO: " + titulo + (": %s" % exc if exc else ""))
+        hora = time.strftime("%H:%M:%S ")
+        resto = (": %s" % exc) if exc else ""
+        gravar_log(hora + "ERRO: " + idiomas.tr("pt", chave, **kw) + resto)
+        self.fila.put(("log", hora + "ERRO: " + self.t(chave, **kw) + resto))
         for l in detalhe.rstrip().splitlines():
             self.log("    " + l)
-        self.fila.put(("aviso", "%s\n\n%s\n\nDetalhes em %s" % (titulo, exc or "", LOG_LAUNCHER)))
+        self.fila.put(("aviso", self.t("erro_aviso", titulo=self.t(chave, **kw), exc=exc or "", log=LOG_LAUNCHER)))
+
+    # ------------------------------------------------------------------ idioma
+    def _pintar(self, tipo: str):
+        chave, kw = self._ult[tipo]
+        {"estado": self.lbl_estado, "servidor": self.lbl_servidor, "versao": self.lbl_versao}[tipo].configure(text=self.t(chave, **kw))
+
+    def _trocar_idioma(self, nome: str):
+        for cod, n in idiomas.NOMES.items():
+            if n == nome:
+                self.idioma = cod
+        self.cfg["idioma"] = self.idioma; salvar_cfg(self.cfg)
+        self._aplicar_idioma()
+
+    def _aplicar_idioma(self):
+        self.w_titulo.configure(text=self.t("titulo"))
+        self.lbl_idioma.configure(text=self.t("idioma"))
+        self.b_online.configure(text=self.t("b_online"))
+        self.b_offline.configure(text=self.t("b_offline"))
+        self.b_parar.configure(text=self.t("b_parar"))
+        self.b_atualizar.configure(text=self.t("b_atualizar"))
+        self.b_log.configure(text=self.t("b_log"))
+        self.w_pasta.configure(text=self.t("w_pasta"))
+        self.b_escolher.configure(text=self.t("b_escolher"))
+        self.chk_barras.configure(text=self.t("chk_barras"))
+        self._mostrar_pasta()
+        for tipo in ("estado", "servidor", "versao"):
+            self._pintar(tipo)
 
     def _rodar(self, nome: str, fn, limpar=True):
         """Roda fn numa thread; qualquer excecao vira erro visivel e, se for um fluxo de jogo, o launcher volta ao estado Pronto."""
@@ -261,17 +318,17 @@ class Launcher:
             try:
                 fn()
             except Exception as e:
-                self.erro("falha em '%s'" % nome, e)
+                self.erro("err_falha", e, nome=nome)
                 if limpar and self.modo:
                     try:
                         self._encerrar_processos(rapido=True)
                     except Exception as e2:
-                        self.erro("falha ao encerrar os processos", e2)
+                        self.erro("err_encerrar", e2)
                     self._fim()
         threading.Thread(target=alvo, daemon=True, name=nome).start()
 
-    def estado(self, msg: str):
-        self.fila.put(("estado", msg))
+    def estado(self, chave: str, **kw):
+        self.fila.put(("estado", (chave, kw)))
 
     def _drenar(self):
         try:
@@ -282,12 +339,8 @@ class Launcher:
                     if int(self.txt.index("end-1c").split(".")[0]) > 3000:
                         self.txt.delete("1.0", "500.0")
                     self.txt.see("end"); self.txt.configure(state="disabled")
-                elif tipo == "estado":
-                    self.lbl_estado.configure(text=val)
-                elif tipo == "servidor":
-                    self.lbl_servidor.configure(text=val)
-                elif tipo == "versao":
-                    self.lbl_versao.configure(text=val)
+                elif tipo in ("estado", "servidor", "versao"):
+                    self._ult[tipo] = val; self._pintar(tipo)
                 elif tipo == "botoes":
                     self._botoes(val)
                 elif tipo == "reiniciar":
@@ -309,31 +362,31 @@ class Launcher:
         while True:
             ip = ip_servidor()
             if not ip:
-                self.fila.put(("servidor", "Servidor online: sem cliente\\host.txt (modo Online indisponível)"))
+                self.fila.put(("servidor", ("srv_sem_host", {})))
             else:
                 ok = porta_aberta(ip, 443)
-                self.fila.put(("servidor", "Servidor online (%s): %s" % (ip, "no ar" if ok else "fora do ar (servidor desligado?)")))
+                self.fila.put(("servidor", ("srv_no_ar" if ok else "srv_fora", {"ip": ip})))
             time.sleep(30)
 
     def _checar_atualizacao(self, aplicar_se_houver=False):
         info = atualizador.verificar(self.repo)
         if not info["ok"]:
-            self.fila.put(("versao", "Versão: %s (não consegui verificar atualizações)" % atualizador.versao_local()))
-            self.log("atualização: " + info["erro"])
+            self.fila.put(("versao", ("versao_nao_verif", {"v": atualizador.versao_local()})))
+            self.logk("upd_msg", e=info["erro"])
             return None
         self.info_atualizacao = info
         if info.get("aviso"):
-            self.log("atualização: " + info["aviso"])
+            self.logk("upd_msg", e=info["aviso"])
         if info["pendentes"]:
-            self.fila.put(("versao", "Versão: %s  →  atualização disponível: %s (%d arquivo(s))" % (atualizador.versao_local(), info["versao"], len(info["pendentes"]))))
-            self.log("atualização %s disponível: %s" % (info["versao"], ", ".join(info["pendentes"][:8]) + (" ..." if len(info["pendentes"]) > 8 else "")))
+            self.fila.put(("versao", ("versao_pend", {"v": atualizador.versao_local(), "n": info["versao"], "c": len(info["pendentes"])})))
+            self.logk("upd_disp", n=info["versao"], arqs=", ".join(info["pendentes"][:8]) + (" ..." if len(info["pendentes"]) > 8 else ""))
             if info.get("notas"):
-                self.log("notas: " + info["notas"])
+                self.logk("upd_notas", n=info["notas"])
         else:
             if atualizador.versao_local() != info["versao"]:
                 try: atualizador.ARQ_VERSAO.write_text(info["versao"] + "\n", encoding="utf-8")
                 except OSError: pass
-            self.fila.put(("versao", "Versão: %s (atualizada)" % info["versao"]))
+            self.fila.put(("versao", ("versao_atual", {"v": info["versao"]})))
         return info
 
     def _aplicar_atualizacao(self) -> bool:
@@ -341,31 +394,31 @@ class Launcher:
         info = self.info_atualizacao or self._checar_atualizacao()
         if not info or not info.get("pendentes"):
             return True
-        self.estado("Atualizando para %s..." % info["versao"])
+        self.estado("estado_atualizando", n=info["versao"])
         try:
             gravados = atualizador.aplicar(info, self.repo, log=self.log)
         except Exception as e:
-            self.log("ERRO na atualização (nada foi trocado): %s" % e)
+            self.logk("upd_falha", e=e)
             return True
         self.info_atualizacao = None
-        self.fila.put(("versao", "Versão: %s (atualizada)" % info["versao"]))
+        self.fila.put(("versao", ("versao_atual", {"v": info["versao"]})))
         if any(g.startswith("launcher/") for g in gravados):
-            self.log("o launcher foi atualizado: reabrindo...")
+            self.logk("upd_reabrir")
             self.fila.put(("reiniciar", None))
             return False
         return True
 
     def atualizar_manual(self):
         def t():
-            self.estado("Procurando atualização...")
+            self.estado("estado_procurando")
             info = self._checar_atualizacao()
             if info and info["pendentes"]:
                 if self._aplicar_atualizacao():
-                    self.estado("Atualizado.")
+                    self.estado("estado_atualizado")
             elif info:
-                self.estado("Já está na versão mais recente.")
+                self.estado("estado_ja_recente")
             else:
-                self.estado("Não consegui verificar atualizações.")
+                self.estado("estado_nao_verif")
         self._rodar("procurar atualizacao", t, limpar=False)
 
     def _reiniciar_launcher(self):
@@ -410,29 +463,28 @@ class Launcher:
         if p:
             self.lbl_pasta.configure(text=p, fg="#e6e6e6")
         else:
-            self.lbl_pasta.configure(text="não encontrada — clique em Escolher... e aponte a pasta do The Day Before", fg="#e0a050")
+            self.lbl_pasta.configure(text=self.t("pasta_nao_achada"), fg="#e0a050")
 
     def escolher_pasta(self) -> bool:
         inicial = self.pasta_jogo() or (str(Path(self.cfg["pasta_jogo"]).parent) if self.cfg.get("pasta_jogo") else "C:\\")
-        escolhida = filedialog.askdirectory(title="Escolha a pasta do The Day Before (a que tem a pasta Survival)", initialdir=inicial,
+        escolhida = filedialog.askdirectory(title=self.t("dlg_pasta_titulo"), initialdir=inicial,
                                             mustexist=True, parent=self.r)
         if not escolhida:
             return False
         raiz = raiz_do_jogo(escolhida)
         if not raiz:
-            messagebox.showerror("TDB Launcher", "Não achei o jogo nessa pasta.\n\nEscolha a pasta do The Day Before: dentro dela deve existir "
-                                 "Survival\\Binaries\\Win64\\TheDayBefore.exe.", parent=self.r)
+            messagebox.showerror("TDB Launcher", self.t("dlg_pasta_invalida"), parent=self.r)
             return False
         self.cfg["pasta_jogo"] = raiz; salvar_cfg(self.cfg)
         self._mostrar_pasta()
-        self.log("pasta do jogo: " + raiz)
+        self.logk("pasta_log", p=raiz)
         return True
 
     def _conferir_pasta(self) -> bool:
         """Antes de jogar: exige uma pasta valida (abre o seletor se faltar)."""
         if self.pasta_jogo():
             return True
-        messagebox.showinfo("TDB Launcher", "Primeiro escolha onde está instalado o The Day Before.", parent=self.r)
+        messagebox.showinfo("TDB Launcher", self.t("dlg_primeiro"), parent=self.r)
         return self.escolher_pasta()
 
     def _iniciar_cliente(self, local: bool):
@@ -442,7 +494,7 @@ class Launcher:
 
     def jogar_online(self):
         if not ip_servidor():
-            messagebox.showwarning("TDB Launcher", "Falta o arquivo cliente\\host.txt com o IP do servidor."); return
+            messagebox.showwarning("TDB Launcher", self.t("dlg_falta_hosttxt")); return
         if not self._conferir_pasta():
             return
         self.modo = "online"; self.fila.put(("botoes", True))
@@ -451,17 +503,17 @@ class Launcher:
             if not self._aplicar_atualizacao():
                 return
             if pids_escutando({443}):
-                self.log("AVISO: algo já usa a porta 443 neste PC (servidor local aberto?). Feche-o, senão a ponte do Firestore falha.")
-            self.estado("Abrindo o jogo (Online, %s)..." % ip_servidor())
+                self.logk("aviso_443")
+            self.estado("estado_online", ip=ip_servidor())
             self._iniciar_cliente(local=False)
             self.proc_cliente.wait()
-            self.log("jogo fechado.")
+            self.logk("jogo_fechado")
             self._fim()
         self._rodar("jogar online", t)
 
     def jogar_offline(self):
         if not HOST.exists():
-            messagebox.showwarning("TDB Launcher", "Não achei host\\servidor_host.py: o modo Offline precisa da pasta do projeto completa."); return
+            messagebox.showwarning("TDB Launcher", self.t("dlg_falta_host")); return
         if not self._conferir_pasta():
             return
         self.modo = "offline"; self.fila.put(("botoes", True))
@@ -469,7 +521,7 @@ class Launcher:
         def t():
             if not self._aplicar_atualizacao():
                 return
-            self.estado("Subindo o servidor local (1-3 min)...")
+            self.estado("estado_subindo")
             try:
                 if LOG_HOST.exists():
                     os.replace(LOG_HOST, LOG_HOST.with_name(LOG_HOST.name + ".anterior"))
@@ -491,13 +543,13 @@ class Launcher:
                 time.sleep(2)
             if not pronto:
                 if not self.parando:
-                    self.log("ERRO: o servidor local não ficou pronto (veja %s)" % LOG_HOST)
+                    self.logk("host_falhou", f=LOG_HOST)
                 self._parar_offline(rapido=True); self._fim(); return
-            self.log("servidor local pronto.")
-            self.estado("Abrindo o jogo (Offline)...")
+            self.logk("host_pronto")
+            self.estado("estado_offline")
             self._iniciar_cliente(local=True)
             self.proc_cliente.wait()
-            self.log("jogo fechado.")
+            self.logk("jogo_fechado")
             self._parar_offline(rapido=self.parando)
             self._fim()
         self._rodar("jogar offline", t)
@@ -510,27 +562,27 @@ class Launcher:
             return None
 
     def _parar_offline(self, rapido=False):
-        self.estado("Fechando o servidor local e salvando...")
+        self.estado("estado_fechando")
         pid = self._pid_host()
         if pid and imagem_do_pid(pid) == "thedaybefore.exe":
-            matar(pid); self.log("host local fechado (PID %d); esperando o export final do Firestore..." % pid)
+            matar(pid); self.logk("host_fechado", pid=pid)
         if self.proc_host and self.proc_host.poll() is None:
             try:
                 self.proc_host.wait(timeout=45 if rapido else 150)   # o runner faz o export final do Firestore ao sair
             except subprocess.TimeoutExpired:
-                self.log("o runner do host não terminou a tempo; encerrando à força")
+                self.logk("runner_forca")
                 matar(self.proc_host.pid)
         # servicos locais (emulador do Firestore, ponte IPv6, terminador TLS) ficam soltos depois do runner: desliga
         for p in pids_escutando({443, 8081, 4400, 4500, 9150}):
             img = imagem_do_pid(p)
             if img in IMAGENS_SERVICO:
-                matar(p); self.log("serviço local desligado: %s (PID %d)" % (img, p))
+                matar(p); self.logk("servico_off", img=img, pid=p)
         self.proc_host = None
 
     def _encerrar_processos(self, rapido=True):
         """Fecha o jogo e o cliente na hora; no Offline, fecha tambem o host local e os servicos."""
         if self.pid_jogo and imagem_do_pid(self.pid_jogo) == "thedaybefore.exe":
-            matar(self.pid_jogo); self.log("jogo fechado (PID %d)" % self.pid_jogo)
+            matar(self.pid_jogo); self.logk("jogo_fechado_pid", pid=self.pid_jogo)
         if self.proc_cliente and self.proc_cliente.poll() is None:
             matar(self.proc_cliente.pid)
         if self.proc_host is not None:
@@ -539,18 +591,18 @@ class Launcher:
     def _fim(self):
         self.modo = None; self.pid_jogo = None; self.proc_cliente = None; self.parando = False
         self.fila.put(("botoes", False))
-        self.estado("Pronto.")
+        self.estado("estado_pronto")
 
     def parar(self):
         if not self.modo:
             return
         self.parando = True
-        self.estado("Parando...")
+        self.estado("estado_parando")
 
         def t():
             # fecha o jogo e o cliente na hora; o fluxo de jogo (jogar_*) percebe e faz o resto (fecha o host no Offline e volta a Pronto)
             if self.pid_jogo and imagem_do_pid(self.pid_jogo) == "thedaybefore.exe":
-                matar(self.pid_jogo); self.log("jogo fechado (PID %d)" % self.pid_jogo)
+                matar(self.pid_jogo); self.logk("jogo_fechado_pid", pid=self.pid_jogo)
             if self.proc_cliente and self.proc_cliente.poll() is None:
                 matar(self.proc_cliente.pid)
             # vigia: se o fluxo de jogo nao voltar sozinho (travado ou morto), encerra tudo e destrava
@@ -558,7 +610,7 @@ class Launcher:
             while self.modo and time.time() < fim:
                 time.sleep(0.5)
             if self.modo:
-                self.log("o launcher não voltou sozinho: encerrando tudo à força")
+                self.logk("forca_tudo")
                 self._encerrar_processos(rapido=True)
                 self._fim()
         self._rodar("parar", t, limpar=False)
@@ -572,8 +624,7 @@ class Launcher:
 
     def fechar(self):
         if self.modo:
-            if not messagebox.askyesno("TDB Launcher", "O jogo está aberto. Fechar o launcher vai fechar o jogo%s. Continuar?" %
-                                       (" e o servidor local" if self.modo == "offline" else "")):
+            if not messagebox.askyesno("TDB Launcher", self.t("dlg_fechar_off" if self.modo == "offline" else "dlg_fechar_on")):
                 return
             self.parar()
             def esperar():
