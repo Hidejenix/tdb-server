@@ -48,7 +48,11 @@ OUT = os.path.join(TMP, "servidor_host%s%s.out" % ("_headless" if SEM_INTERFACE 
 SCRIPTS = ["ssl_unpin.js", "tdb_connectex_test.js", "fake_server_join.js", "host_flow_servidor.js",
            "modo_dedicado.js", "listen_nativo.js", "replicacao_otimizada.js", "disparar_onserverload.js",
            "reaplicar_aparencia.js",
-           "quest_fix.js"]   # 07/11: itens de quest (QuestList dos baus preenchido quando o mapa estabiliza)   # 07/11: rosto/cabelo/barba de quem chega depois (multicast perdido)
+           "quest_fix.js",
+           "id_unico.js",
+           "spawn_trace.js"]   # 10/11: so leitura - registra tutorial/posicao salva (bug de nascer na sala do doutor)
+#   # 10/11: contador de ID dos itens nao recomeca de 0 (itens sumindo do bau por ID repetido)
+#   # 07/11: itens de quest (QuestList dos baus preenchido quando o mapa estabiliza)   # 07/11: rosto/cabelo/barba de quem chega depois (multicast perdido)
 # host_otimizado (07/11): replicacao_otimizada.js substitui replicacao.js + replicacao_donos.js + replicacao_distancia.js
 # (laco em C/CModule + NetUpdateFrequency). --sem-frequencia: mesmo laco em C sem o ritmo por ator (para comparar).
 # --freq-min N: piso de atualizacoes por segundo (padrao 4).

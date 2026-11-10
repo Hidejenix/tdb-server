@@ -48,7 +48,11 @@ OUT = os.path.join(TMP, "servidor_host%s%s.out" % ("_headless" if SEM_INTERFACE 
 SCRIPTS = ["ssl_unpin.js", "tdb_connectex_test.js", "fake_server_join.js", "host_flow_servidor.js",
            "modo_dedicado.js", "listen_nativo.js", "replicacao.js", "replicacao_donos.js", "replicacao_distancia.js", "disparar_onserverload.js",
            "reaplicar_aparencia.js",
-           "quest_fix.js"]   # 07/11: itens de quest (QuestList dos baus preenchido quando o mapa estabiliza)   # 07/11: rosto/cabelo/barba de quem chega depois (multicast perdido)
+           "quest_fix.js",
+           "id_unico.js",
+           "spawn_trace.js"]   # 10/11: so leitura - registra tutorial/posicao salva (bug de nascer na sala do doutor)
+#   # 10/11: contador de ID dos itens nao recomeca de 0 (itens sumindo do bau por ID repetido)
+#   # 07/11: itens de quest (QuestList dos baus preenchido quando o mapa estabiliza)   # 07/11: rosto/cabelo/barba de quem chega depois (multicast perdido)
 # monitor_bugs.js (06/11): vigia itens sumindo e tiro em zumbi fantasma; filtro em C (CModule), barato. --sem-monitores desliga.
 if "--sem-monitores" not in sys.argv:
     SCRIPTS.append("monitor_bugs.js")
