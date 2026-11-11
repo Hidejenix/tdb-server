@@ -1,12 +1,9 @@
-"""TDB Launcher (08/11/2026): abre The Day Before no servidor da comunidade (Online) ou no servidor do proprio PC (Offline),
-e atualiza o cliente pelo GitHub Releases. Abrir com "Abrir TDB Launcher.bat" na raiz do projeto.
+TDB Launcher (08.11.2026): позволяет запустить игру The Day Before через сервер сообщества (онлайн-режим) или локальный сервер на вашем ПК (офлайн-режим), а также обновляет клиент игры через GitHub Releases. Для запуска используйте файл «Abrir TDB Launcher.bat», расположенный в корневой папке проекта.
 
-Online : python cliente\\cliente_conecta.py           (IP em cliente\\host.txt; SteamId unico da pessoa)
-Offline: python host\\servidor_host.py --appdata-separado  -> espera "[lnat] LISTEN OK" -> python cliente\\cliente_conecta.py --local
-         (ID antigo, onde estao os saves locais). Ao fechar o jogo: fecha o host (export final do Firestore) e desliga os servicos
-         locais (emulador e terminador TLS na 443), para o modo Online poder abrir a ponte na 443 depois.
-Pasta do jogo: escolhida na janela ("Escolher..."), guardada em launcher\\config.json (local; a atualizacao nunca mexe nele).
-"""
+Онлайн-режим: python cliente\\cliente_conecta.py (IP-адрес указывается в файле cliente\\host.txt; используется уникальный SteamID).
+Офлайн-режим: python host\\servidor_host.py --appdata-separado -> дождитесь появления сообщения «[lnat] LISTEN OK» -> python cliente\\cliente_conecta.py --local
+(Используется устаревший ID, к которому привязаны локальные файлы сохранений). При закрытии игры хост-сервер завершает работу (выполняя финальный экспорт данных в Firestore), а локальные службы (эмулятор и TLS-терминатор на порту 443) останавливаются, что позволяет в дальнейшем использовать порт 443 для онлайн-режима.
+Директория игры: выбирается в открывающемся окне (кнопка «Escolher...» / «Choose...») и сохраняется в файле launcher\\config.json (этот локальный файл не затрагивается при обновлениях).
 from __future__ import annotations
 
 import json
