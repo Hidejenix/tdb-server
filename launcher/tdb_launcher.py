@@ -195,7 +195,7 @@ class Launcher:
         r.geometry("980x700")
         r.minsize(820, 620)
 
-        # ÐÐ°Ð»Ð¸ÑÑÐ°: ÑÑÐ¼Ð½ÑÐ¹ Ð¸Ð³ÑÐ¾Ð²Ð¾Ð¹ Ð¸Ð½ÑÐµÑÑÐµÐ¹Ñ Ñ ÑÐ¾Ð»Ð¾Ð´Ð½ÑÐ¼Ð¸ Ð°ÐºÑÐµÐ½ÑÐ°Ð¼Ð¸
+        # Палитра: тёмный игровой интерфейс с холодными акцентами
         bg = "#090D14"
         panel = "#111925"
         panel2 = "#172333"
@@ -218,7 +218,7 @@ class Launcher:
                             font=("Segoe UI", size, "bold" if bold else "normal"),
                             **kwargs)
 
-        # ÐÐµÑÑÐ½ÑÑ Ð¿Ð°Ð½ÐµÐ»Ñ
+        # Верхняя панель
         top = tk.Frame(r, bg=bg)
         top.pack(fill="x", padx=30, pady=(24, 18))
         brand = tk.Frame(top, bg=bg)
@@ -231,7 +231,7 @@ class Launcher:
         self.w_titulo = tk.Label(heading, text=self.t("titulo"), bg=bg, fg=white,
                                  font=("Segoe UI", 17, "bold"), anchor="w")
         self.w_titulo.pack(anchor="w")
-        label(heading, "COMMUNITY EDITION  â¢  THE DAY BEFORE", 8, muted, True).pack(anchor="w", pady=(3, 0))
+        label(heading, "COMMUNITY EDITION  •  THE DAY BEFORE", 8, muted, True).pack(anchor="w", pady=(3, 0))
 
         langbox = tk.Frame(top, bg=panel, highlightthickness=1, highlightbackground=border)
         langbox.pack(side="right", padx=(12, 0))
@@ -249,7 +249,7 @@ class Launcher:
 
 
 
-        # Ð¡ÑÐ°ÑÑÑÐ½ÑÐµ ÐºÐ°ÑÑÐ¾ÑÐºÐ¸
+        # Статусные карточки
         statuses = tk.Frame(r, bg=bg)
         statuses.pack(fill="x", padx=30, pady=(0, 16))
         statuses.columnconfigure(0, weight=1)
@@ -258,17 +258,17 @@ class Launcher:
         server_card.grid(row=0, column=0, sticky="nsew", padx=(0, 7))
         version_card = card(statuses, panel, 15, 12)
         version_card.grid(row=0, column=1, sticky="nsew", padx=(7, 0))
-        label(server_card, "â  SERVER STATUS", 8, green, True).pack(anchor="w")
+        label(server_card, "●  SERVER STATUS", 8, green, True).pack(anchor="w")
         self.lbl_servidor = tk.Label(server_card, text=self.t("srv_verificando"), bg=panel,
                                      fg=white, font=("Segoe UI", 10, "bold"), anchor="w")
         self.lbl_servidor.pack(anchor="w", pady=(7, 0))
-        label(version_card, "â»  LAUNCHER VERSION", 8, blue, True).pack(anchor="w")
+        label(version_card, "↻  LAUNCHER VERSION", 8, blue, True).pack(anchor="w")
         self.lbl_versao = tk.Label(version_card,
                                    text=self.t("versao", v=atualizador.versao_local()),
                                    bg=panel, fg=white, font=("Segoe UI", 10, "bold"), anchor="w")
         self.lbl_versao.pack(anchor="w", pady=(7, 0))
 
-        # Ð¦ÐµÐ½ÑÑÐ°Ð»ÑÐ½Ð°Ñ Ð¾Ð±Ð»Ð°ÑÑÑ: Ð·Ð°Ð¿ÑÑÐº Ð¸ Ð½Ð°ÑÑÑÐ¾Ð¹ÐºÐ¸
+        # Центральная область: запуск и настройки
         content = tk.Frame(r, bg=bg)
         content.pack(fill="x", padx=30, pady=(0, 14))
         play = card(content, panel, 18, 15)
@@ -316,7 +316,7 @@ class Launcher:
                                          font=("Segoe UI", 9), anchor="w")
         self.chk_barras.pack(anchor="w")
 
-        # ÐÐ¸Ð¶Ð½ÑÑ Ð¿Ð°Ð½ÐµÐ»Ñ Ð¸Ð½ÑÑÑÑÐ¼ÐµÐ½ÑÐ¾Ð²
+        # Нижняя панель инструментов
         tools = tk.Frame(r, bg=bg)
         tools.pack(fill="x", padx=30, pady=(0, 10))
         toolstyle = dict(bg="#1A2736", fg="#C7D3E1", activebackground="#2A3C51",
@@ -332,14 +332,14 @@ class Launcher:
         self.b_log.pack(side="left", padx=(7, 0))
         label(tools, "TDB COMMUNITY LAUNCHER", 8, "#52657B", True).pack(side="right", pady=10)
 
-        # ÐÐ¾Ð½ÑÐ¾Ð»Ñ Ð»Ð¾Ð³Ð¾Ð²
+        # Консоль логов
         logs = card(r, "#0D141E", 12, 10)
         logs.pack(fill="both", expand=True, padx=30, pady=(0, 22))
         loghead = tk.Frame(logs, bg="#0D141E")
         loghead.pack(fill="x", pady=(0, 7))
         tk.Label(loghead, text="SYSTEM CONSOLE", bg="#0D141E", fg=muted,
                  font=("Segoe UI", 8, "bold")).pack(side="left")
-        tk.Label(loghead, text="â LIVE", bg="#0D141E", fg=green,
+        tk.Label(loghead, text="● LIVE", bg="#0D141E", fg=green,
                  font=("Segoe UI", 8, "bold")).pack(side="right")
         self.txt = scrolledtext.ScrolledText(logs, bg="#0A1018", fg="#AFC2D8",
                                              insertbackground=white, font=("Cascadia Mono", 8),
