@@ -22,7 +22,7 @@ import zipfile
 from pathlib import Path
 
 RAIZ = Path(__file__).resolve().parent.parent
-REPO = "yan1451/tdb-server"
+REPO = "Hidejenix/tdb-server"
 sys.path.insert(0, str(RAIZ / "launcher"))
 from atualizador import PROTEGIDOS, caminho_ok  # noqa: E402
 
