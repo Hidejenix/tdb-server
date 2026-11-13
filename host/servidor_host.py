@@ -284,7 +284,7 @@ LISTA_URL = ("http://127.0.0.1:8081/v1/projects/the-day-before-8f438/databases/(
              "server-list/us-central/versions/3/servers/%s:%d" % (IP_PUBLICO, PORTA))
 # O jogo usa o NOME do documento (ip:porta) como endereco do join (medido 06/11 18:04: com o doc '127.0.0.1:7777' o cliente
 # mandava o join para o proprio PC mesmo com o host na VPS). Nome exibido: TDB_NOME_SERVIDOR (padrao SERVIDOR-LOCAL).
-NOME_SERVIDOR = os.environ.get("TDB_NOME_SERVIDOR", "SERVIDOR-LOCAL")
+NOME_SERVIDOR = os.environ.get("TDB_NOME_SERVIDOR", "THE-AFTER-DAY-LOCAL")
 
 def criar_servidor_na_lista():
     """Cria/atualiza o documento que o Server Browser do jogo le (server-list/us-central/versions/3/servers)."""
