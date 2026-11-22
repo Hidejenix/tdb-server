@@ -1,1 +1,86 @@
+name: The Day After — Discord Release
 
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  announce:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Translate release notes and publish to Discord
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK }}
+          DEEPL_AUTH_KEY: ${{ secrets.DEEPL_AUTH_KEY }}
+          RELEASE_NAME: ${{ github.event.release.name }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_BODY: ${{ github.event.release.body }}
+          RELEASE_URL: ${{ github.event.release.html_url }}
+          RELEASE_AUTHOR: ${{ github.event.release.author.login }}
+          RELEASE_DATE: ${{ github.event.release.published_at }}
+          IS_PRERELEASE: ${{ github.event.release.prerelease }}
+          ASSETS_JSON: ${{ toJson(github.event.release.assets) }}
+        run: |
+          node <<'NODE'
+          const webhook = process.env.DISCORD_WEBHOOK_URL;
+          const deeplKey = process.env.DEEPL_AUTH_KEY;
+          if (!webhook) throw new Error("Missing DISCORD_RELEASE_WEBHOOK secret");
+          if (!deeplKey) throw new Error("Missing DEEPL_AUTH_KEY secret");
+
+          const original = (process.env.RELEASE_BODY || "").trim()
+            || "Автор не добавил описание изменений к этому релизу.";
+
+          async function translate(text, targetLang) {
+            const endpoint = deeplKey.endsWith(":fx")
+              ? "https://api-free.deepl.com/v2/translate"
+              : "https://api.deepl.com/v2/translate";
+            const response = await fetch(endpoint, {
+              method: "POST",
+              headers: {
+                "Authorization": `DeepL-Auth-Key ${deeplKey}`,
+                "Content-Type": "application/x-www-form-urlencoded"
+              },
+              body: new URLSearchParams({ text, target_lang: targetLang, preserve_formatting: "1" })
+            });
+            if (!response.ok) throw new Error(`DeepL ${targetLang}: ${response.status} ${await response.text()}`);
+            const data = await response.json();
+            return data.translations?.[0]?.text || text;
+          }
+
+          const [en, ru] = await Promise.all([translate(original, "EN"), translate(original, "RU")]);
+          const clip = (s, max) => s.length > max ? s.slice(0, max - 3) + "..." : s;
+          const assets = JSON.parse(process.env.ASSETS_JSON || "[]");
+          const downloads = assets.slice(0, 6).map(a => `[${a.name}](${a.browser_download_url})`).join("\n");
+          const fields = [
+            { name: "🇬🇧 English", value: clip(en, 1024), inline: false },
+            { name: "🇷🇺 Русский", value: clip(ru, 1024), inline: false },
+            { name: "Version", value: `\`${process.env.RELEASE_TAG || "—"}\``, inline: true },
+            { name: "Author", value: process.env.RELEASE_AUTHOR || "unknown", inline: true },
+            { name: "Release type", value: process.env.IS_PRERELEASE === "true" ? "Pre-release" : "Stable", inline: true }
+          ];
+          if (downloads) fields.push({ name: "Downloads", value: clip(downloads, 1024), inline: false });
+
+          const payload = {
+            username: "The Day After • Updates",
+            embeds: [{
+              title: clip(process.env.RELEASE_NAME || process.env.RELEASE_TAG || "New release", 256),
+              url: process.env.RELEASE_URL,
+              description: "A new version of The Day After is available.",
+              color: 0xC49A45,
+              fields,
+              timestamp: process.env.RELEASE_DATE || new Date().toISOString(),
+              footer: { text: "THE DAY AFTER • RELEASES" }
+            }],
+            allowed_mentions: { parse: [] }
+          };
+          const response = await fetch(webhook, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+          });
+          if (!response.ok) throw new Error(`Discord webhook: ${response.status} ${await response.text()}`);
+          console.log("Bilingual release announcement sent.");
+          NODE
