@@ -33,51 +33,60 @@ jobs:
               return "Описание обновления отсутствует.";
             }
 
-            let result = text;
+            let lines = text.split(/\r?\n/);
+            let result = [];
+            let skipNextValue = false;
+            let skipDownloads = false;
 
-            // Удаляем Version и значение
-            result = result.replace(
-              /^\s*\*\*Version\*\*\s*\r?\n[^\r\n]*\r?\n?/gim,
-              ""
-            );
+            for (let line of lines) {
+              const trimmed = line.trim();
 
-            // Удаляем Author и значение
-            result = result.replace(
-              /^\s*\*\*Author\*\*\s*\r?\n[^\r\n]*\r?\n?/gim,
-              ""
-            );
+              // Если начался блок Downloads — удаляем его целиком
+              if (/^\*{0,2}\s*Downloads\s*:?\s*\*{0,2}\s*$/i.test(trimmed)) {
+                skipDownloads = true;
+                continue;
+              }
 
-            // Удаляем Release type и значение
-            result = result.replace(
-              /^\s*\*\*Release type\*\*\s*\r?\n[^\r\n]*\r?\n?/gim,
-              ""
-            );
+              if (skipDownloads) {
+                continue;
+              }
 
-            // Удаляем Downloads и всё содержимое после него
-            result = result.replace(
-              /^\s*\*\*Downloads\*\*[\s\S]*$/gim,
-              ""
-            );
+              // Удаляем заголовки Version, Author, Release type
+              if (
+                /^\*{0,2}\s*(Version|Author|Release\s*type)\s*:?\s*\*{0,2}\s*$/i.test(trimmed)
+              ) {
+                skipNextValue = true;
+                continue;
+              }
 
-            // Удаляем Markdown-ссылки
-            result = result.replace(
-              /\[([^\]]+)\]\(https?:\/\/[^)]+\)/g,
-              ""
-            );
+              // Удаляем значение соответствующего поля
+              if (skipNextValue) {
+                if (trimmed === "") {
+                  continue;
+                }
 
-            // Удаляем оставшиеся URL
-            result = result.replace(
-              /https?:\/\/\S+/g,
-              ""
-            );
+                skipNextValue = false;
+                continue;
+              }
 
-            // Убираем лишние пустые строки
-            result = result
-              .replace(/[ \t]+\n/g, "\n")
+              // Удаляем ссылки Markdown и их содержимое
+              if (
+                /^\[?.*\]?\(https?:\/\/.*\)\s*$/i.test(trimmed) ||
+                /^https?:\/\/\S+/i.test(trimmed)
+              ) {
+                continue;
+              }
+
+              // Удаляем оставшиеся URL
+              line = line.replace(/https?:\/\/\S+/g, "").trim();
+
+              result.push(line);
+            }
+
+            return result
+              .join("\n")
               .replace(/\n{3,}/g, "\n\n")
-              .trim();
-
-            return result || "Описание обновления отсутствует.";
+              .trim() || "Описание обновления отсутствует.";
           }
 
           const title = (
@@ -89,13 +98,11 @@ jobs:
           );
 
           const payload = {
-            embeds: [
-              {
-                title: title.slice(0, 256),
-                description: description.slice(0, 4000),
-                color: 0xC49A45
-              }
-            ],
+            embeds: [{
+              title: title.slice(0, 256),
+              description: description.slice(0, 4000),
+              color: 0xC49A45
+            }],
             allowed_mentions: {
               parse: []
             }
@@ -110,14 +117,10 @@ jobs:
           });
 
           if (!response.ok) {
-            const error = await response.text();
-
             throw new Error(
-              `Discord error ${response.status}: ${error}`
+              `Discord error ${response.status}: ${await response.text()}`
             );
           }
 
-          console.log(
-            "The Day After update successfully published to Discord!"
-          );
+          console.log("Release announcement successfully sent!");
           NODE
