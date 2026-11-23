@@ -10,13 +10,16 @@ permissions:
 
 jobs:
   announce:
+    name: Publish update to Discord
     runs-on: ubuntu-latest
+
     steps:
       - name: Send release announcement
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK }}
           RELEASE_NAME: ${{ github.event.release.name }}
           RELEASE_BODY: ${{ github.event.release.body }}
+
         run: |
           node <<'NODE'
           const webhook = process.env.DISCORD_WEBHOOK_URL;
@@ -25,30 +28,96 @@ jobs:
             throw new Error("DISCORD_RELEASE_WEBHOOK is missing");
           }
 
-          const clean = (text) => text
-            .replace(/\[([^\]]+)\]\(https?:\/\/[^)]+\)/g, "$1")
-            .replace(/https?:\/\/\S+/g, "")
-            .replace(/<https?:\/\/[^>]+>/g, "")
-            .trim();
+          function cleanDescription(text) {
+            if (!text) {
+              return "Описание обновления отсутствует.";
+            }
 
-          const title = clean(process.env.RELEASE_NAME || "Новое обновление");
-          const description = clean(process.env.RELEASE_BODY || "Описание обновления пока не добавлено.");
+            let result = text;
 
-          const response = await fetch(webhook, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              username: "The Day After",
-              embeds: [{
+            // Удаляем Version и значение
+            result = result.replace(
+              /^\s*\*\*Version\*\*\s*\r?\n[^\r\n]*\r?\n?/gim,
+              ""
+            );
+
+            // Удаляем Author и значение
+            result = result.replace(
+              /^\s*\*\*Author\*\*\s*\r?\n[^\r\n]*\r?\n?/gim,
+              ""
+            );
+
+            // Удаляем Release type и значение
+            result = result.replace(
+              /^\s*\*\*Release type\*\*\s*\r?\n[^\r\n]*\r?\n?/gim,
+              ""
+            );
+
+            // Удаляем Downloads и всё содержимое после него
+            result = result.replace(
+              /^\s*\*\*Downloads\*\*[\s\S]*$/gim,
+              ""
+            );
+
+            // Удаляем Markdown-ссылки
+            result = result.replace(
+              /\[([^\]]+)\]\(https?:\/\/[^)]+\)/g,
+              ""
+            );
+
+            // Удаляем оставшиеся URL
+            result = result.replace(
+              /https?:\/\/\S+/g,
+              ""
+            );
+
+            // Убираем лишние пустые строки
+            result = result
+              .replace(/[ \t]+\n/g, "\n")
+              .replace(/\n{3,}/g, "\n\n")
+              .trim();
+
+            return result || "Описание обновления отсутствует.";
+          }
+
+          const title = (
+            process.env.RELEASE_NAME || "Новое обновление"
+          ).trim();
+
+          const description = cleanDescription(
+            process.env.RELEASE_BODY
+          );
+
+          const payload = {
+            embeds: [
+              {
                 title: title.slice(0, 256),
                 description: description.slice(0, 4000),
                 color: 0xC49A45
-              }],
-              allowed_mentions: { parse: [] }
-            })
+              }
+            ],
+            allowed_mentions: {
+              parse: []
+            }
+          };
+
+          const response = await fetch(webhook, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify(payload)
           });
 
           if (!response.ok) {
-            throw new Error(`Discord error: ${response.status}`);
+            const error = await response.text();
+
+            throw new Error(
+              `Discord error ${response.status}: ${error}`
+            );
           }
+
+          console.log(
+            "The Day After update successfully published to Discord!"
+          );
           NODE
