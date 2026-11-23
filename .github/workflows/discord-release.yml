@@ -1,4 +1,5 @@
-name: The Day After — Discord Release
+
+name: Discord Release Announcement
 
 on:
   release:
@@ -11,68 +12,43 @@ jobs:
   announce:
     runs-on: ubuntu-latest
     steps:
-      - name: Publish release to Discord
+      - name: Send release announcement
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK }}
           RELEASE_NAME: ${{ github.event.release.name }}
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
           RELEASE_BODY: ${{ github.event.release.body }}
-          RELEASE_URL: ${{ github.event.release.html_url }}
-          RELEASE_AUTHOR: ${{ github.event.release.author.login }}
-          RELEASE_DATE: ${{ github.event.release.published_at }}
-          IS_PRERELEASE: ${{ github.event.release.prerelease }}
-          ASSETS_JSON: ${{ toJson(github.event.release.assets) }}
         run: |
           node <<'NODE'
           const webhook = process.env.DISCORD_WEBHOOK_URL;
-          if (!webhook) throw new Error("Missing DISCORD_RELEASE_WEBHOOK secret");
 
-          const clip = (s, max) => s.length > max ? s.slice(0, max - 3) + "..." : s;
-          const releaseBody = (process.env.RELEASE_BODY || "").trim()
-            || "No release description was provided.";
-
-          const assets = JSON.parse(process.env.ASSETS_JSON || "[]");
-          const downloads = assets.slice(0, 6)
-            .map(a => `[${a.name}](${a.browser_download_url})`)
-            .join("\n");
-
-          const fields = [
-            { name: "Version", value: `\`${process.env.RELEASE_TAG || "—"}\``, inline: true },
-            { name: "Author", value: process.env.RELEASE_AUTHOR || "unknown", inline: true },
-            {
-              name: "Release type",
-              value: process.env.IS_PRERELEASE === "true" ? "Pre-release" : "Stable",
-              inline: true
-            }
-          ];
-
-          if (downloads) {
-            fields.push({ name: "Downloads", value: clip(downloads, 1024), inline: false });
+          if (!webhook) {
+            throw new Error("DISCORD_RELEASE_WEBHOOK is missing");
           }
 
-          const payload = {
-            username: "The Day After • Updates",
-            embeds: [{
-              title: clip(process.env.RELEASE_NAME || process.env.RELEASE_TAG || "New release", 256),
-              url: process.env.RELEASE_URL,
-              description: clip(releaseBody, 4096),
-              color: 0xC49A45,
-              fields,
-              timestamp: process.env.RELEASE_DATE || new Date().toISOString(),
-              footer: { text: "THE DAY AFTER • RELEASES" }
-            }],
-            allowed_mentions: { parse: [] }
-          };
+          const clean = (text) => text
+            .replace(/\[([^\]]+)\]\(https?:\/\/[^)]+\)/g, "$1")
+            .replace(/https?:\/\/\S+/g, "")
+            .replace(/<https?:\/\/[^>]+>/g, "")
+            .trim();
+
+          const title = clean(process.env.RELEASE_NAME || "Новое обновление");
+          const description = clean(process.env.RELEASE_BODY || "Описание обновления пока не добавлено.");
 
           const response = await fetch(webhook, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload)
+            body: JSON.stringify({
+              username: "The Day After",
+              embeds: [{
+                title: title.slice(0, 256),
+                description: description.slice(0, 4000),
+                color: 0xC49A45
+              }],
+              allowed_mentions: { parse: [] }
+            })
           });
 
           if (!response.ok) {
-            throw new Error(`Discord webhook: ${response.status} ${await response.text()}`);
+            throw new Error(`Discord error: ${response.status}`);
           }
-
-          console.log("Release announcement sent to Discord.");
           NODE
