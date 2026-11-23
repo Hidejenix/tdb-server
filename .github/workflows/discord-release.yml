@@ -33,58 +33,59 @@ jobs:
               return "Описание обновления отсутствует.";
             }
 
-            let lines = text.split(/\r?\n/);
-            let result = [];
-            let skipNextValue = false;
+            const lines = text.split(/\r?\n/);
+            const result = [];
+
+            let skipValue = false;
             let skipDownloads = false;
 
-            for (let line of lines) {
+            for (const line of lines) {
               const trimmed = line.trim();
 
-              // Если начался блок Downloads — удаляем его целиком
+              if (!trimmed) {
+                if (!skipDownloads && !skipValue) {
+                  result.push("");
+                }
+                continue;
+              }
+
+              // Полностью удаляем Downloads и всё после него
               if (/^\*{0,2}\s*Downloads\s*:?\s*\*{0,2}\s*$/i.test(trimmed)) {
                 skipDownloads = true;
                 continue;
               }
 
-              if (skipDownloads) {
+              if (skipDownloads) continue;
+
+              // Удаляем технические заголовки
+              if (/^\*{0,2}\s*(Version|Author|Release\s*type)\s*:?\s*\*{0,2}\s*$/i.test(trimmed)) {
+                skipValue = true;
                 continue;
               }
 
-              // Удаляем заголовки Version, Author, Release type
-              if (
-                /^\*{0,2}\s*(Version|Author|Release\s*type)\s*:?\s*\*{0,2}\s*$/i.test(trimmed)
-              ) {
-                skipNextValue = true;
+              // Удаляем значение технического поля
+              if (skipValue) {
+                skipValue = false;
                 continue;
               }
 
-              // Удаляем значение соответствующего поля
-              if (skipNextValue) {
-                if (trimmed === "") {
-                  continue;
-                }
-
-                skipNextValue = false;
+              // Удаляем технические поля, если значение находится на той же строке
+              if (/^\*{0,2}\s*(Version|Author|Release\s*type)\s*:.*$/i.test(trimmed)) {
                 continue;
               }
 
-              // Удаляем ссылки Markdown и их содержимое
-              if (
-                /^\[?.*\]?\(https?:\/\/.*\)\s*$/i.test(trimmed) ||
-                /^https?:\/\/\S+/i.test(trimmed)
-              ) {
-                continue;
+              // Удаляем URL и Markdown-ссылки
+              let cleaned = line
+                .replace(/\[([^\]]+)\]\(https?:\/\/[^)]+\)/g, "")
+                .replace(/https?:\/\/\S+/g, "")
+                .trim();
+
+              if (cleaned) {
+                result.push(cleaned);
               }
-
-              // Удаляем оставшиеся URL
-              line = line.replace(/https?:\/\/\S+/g, "").trim();
-
-              result.push(line);
             }
 
-            return result
-              .join("\n")
+            return result.join("\n")
               .replace(/\n{3,}/g, "\n\n")
               .trim() || "Описание обновления отсутствует.";
           }
