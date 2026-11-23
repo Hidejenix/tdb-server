@@ -63,6 +63,9 @@ if "--sem-monitores" not in sys.argv:
 # resgate_queda.js (06/11): unstuck automatico (6 s caindo ou abaixo do mapa) e manual (linux/unstuck.sh). --sem-resgate desliga.
 if "--sem-resgate" not in sys.argv:
     SCRIPTS.append("resgate_queda.js")
+# 10/11: diagnostico de desempenho: TDB_SEM_SCRIPTS=a.js,b.js tira scripts da lista (bisseccao do atraso do host).
+for _x in [t for t in os.environ.get("TDB_SEM_SCRIPTS", "").split(",") if t]:
+    if _x in SCRIPTS: SCRIPTS.remove(_x)
 # LocalAppData proprio (06/11): na porta de teste (ou com --appdata-separado) a instancia usa outra pasta LocalAppData, porque o banco
 # local do Firestore (LevelDB com LOCK) em %LOCALAPPDATA%\firestore so abre em um processo por usuario (a 2a instancia caia).
 APPDATA_SEPARADO = ("--appdata-separado" in sys.argv) or PORTA != 7777
@@ -179,7 +182,8 @@ EXPORT_A_CADA = 60   # segundos
 MARCOS = ("LISTEN OK", "reenviada a aparencia", "[qfix]", "ABORTADO", "ERRO", "DESLIGADO", "NetMode", "canal aberto: Pawn", "chamando OnServerLoad",
           "LoginCompleted", "PHASE", "placeholder de cliente visto", "SurvivalPlayer_V2_C", "InitPlayer", "OnError", "erro",
           "SteamId", "Firestore", "ConnectEx IPv", "ITEM SUMIU", "TIRO EM ZUMBI LONGE", "[ping]", "alvos vigiados", "canal FECHADO",
-          "TELEPORTE", "TROCOU PAWN", "SEM PAWN", "classe preservada", "RESGATE", "pedido manual")
+          "TELEPORTE", "TROCOU PAWN", "SEM PAWN", "classe preservada", "RESGATE", "pedido manual",
+          "[dados]", "[timeout]", "[uid]", "[resgate]", "NAO redirecionado")   # 12/11: linhas uteis no launcher.log para diagnostico
 
 # Identidade Steam (emulador Goldberg): host e cliente usam a mesma instalacao, e o emulador le o ID ao abrir o processo
 # (force_steamid.txt da pasta do Engine, onde esta o steam_api64.dll carregado; configs.user.ini gravado junto).
