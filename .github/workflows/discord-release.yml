@@ -1,4 +1,3 @@
-
 name: Discord Release Announcement
 
 on:
@@ -10,13 +9,16 @@ permissions:
 
 jobs:
   announce:
+    name: Publish update to Discord
     runs-on: ubuntu-latest
+
     steps:
       - name: Send release announcement
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK }}
           RELEASE_NAME: ${{ github.event.release.name }}
           RELEASE_BODY: ${{ github.event.release.body }}
+
         run: |
           node <<'NODE'
           const webhook = process.env.DISCORD_WEBHOOK_URL;
@@ -25,30 +27,68 @@ jobs:
             throw new Error("DISCORD_RELEASE_WEBHOOK is missing");
           }
 
-          const clean = (text) => text
-            .replace(/\[([^\]]+)\]\(https?:\/\/[^)]+\)/g, "$1")
-            .replace(/https?:\/\/\S+/g, "")
-            .replace(/<https?:\/\/[^>]+>/g, "")
-            .trim();
+          function cleanDescription(text) {
+            if (!text) {
+              return "Описание обновления отсутствует.";
+            }
 
-          const title = clean(process.env.RELEASE_NAME || "Новое обновление");
-          const description = clean(process.env.RELEASE_BODY || "Описание обновления пока не добавлено.");
+            // Удаляем ВСЁ начиная с технического блока Version
+            // включая Author, Release type, Downloads и ссылки на файлы.
+            const technicalBlock = /^\s*\*\*\s*Version\s*\*\*[\s\S]*$/im;
 
-          const response = await fetch(webhook, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              username: "The Day After",
-              embeds: [{
+            let description = text.replace(technicalBlock, "");
+
+            // Удаляем случайные ссылки, если они остались в описании
+            description = description
+              .replace(/\[([^\]]+)\]\(https?:\/\/[^)]+\)/g, "$1")
+              .replace(/https?:\/\/\S+/g, "");
+
+            return description
+              .replace(/\n{3,}/g, "\n\n")
+              .trim() || "Описание обновления отсутствует.";
+          }
+
+          const title = (
+            process.env.RELEASE_NAME || "Новое обновление"
+          ).trim();
+
+          const description = cleanDescription(
+            process.env.RELEASE_BODY
+          );
+
+          // Используем оригинальное имя и аватар Discord Webhook.
+          // Не добавляем дополнительные поля, ссылки и футер.
+
+          const payload = {
+            embeds: [
+              {
                 title: title.slice(0, 256),
                 description: description.slice(0, 4000),
                 color: 0xC49A45
-              }],
-              allowed_mentions: { parse: [] }
-            })
+              }
+            ],
+            allowed_mentions: {
+              parse: []
+            }
+          };
+
+          const response = await fetch(webhook, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify(payload)
           });
 
           if (!response.ok) {
-            throw new Error(`Discord error: ${response.status}`);
+            const error = await response.text();
+
+            throw new Error(
+              `Discord error ${response.status}: ${error}`
+            );
           }
+
+          console.log(
+            "The Day After release successfully published to Discord!"
+          );
           NODE
