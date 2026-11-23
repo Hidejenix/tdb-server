@@ -36,45 +36,48 @@ jobs:
             const lines = text.split(/\r?\n/);
             const result = [];
 
-            let skipValue = false;
+            let skipNextValue = false;
             let skipDownloads = false;
 
             for (const line of lines) {
               const trimmed = line.trim();
 
-              if (!trimmed) {
-                if (!skipDownloads && !skipValue) {
-                  result.push("");
-                }
-                continue;
-              }
-
-              // Полностью удаляем Downloads и всё после него
+              // Удаляем весь блок Downloads и всё после него
               if (/^\*{0,2}\s*Downloads\s*:?\s*\*{0,2}\s*$/i.test(trimmed)) {
                 skipDownloads = true;
                 continue;
               }
 
-              if (skipDownloads) continue;
-
-              // Удаляем технические заголовки
-              if (/^\*{0,2}\s*(Version|Author|Release\s*type)\s*:?\s*\*{0,2}\s*$/i.test(trimmed)) {
-                skipValue = true;
+              if (skipDownloads) {
                 continue;
               }
 
-              // Удаляем значение технического поля
-              if (skipValue) {
-                skipValue = false;
+              // Удаляем техническую подпись релиза
+              if (/^\*{0,2}\s*THE DAY AFTER\s*•\s*RELEASES.*$/i.test(trimmed)) {
                 continue;
               }
 
-              // Удаляем технические поля, если значение находится на той же строке
-              if (/^\*{0,2}\s*(Version|Author|Release\s*type)\s*:.*$/i.test(trimmed)) {
+              // Удаляем Version, Author и Release type
+              const metadata = trimmed.match(
+                /^\*{0,2}\s*(Version|Author|Release\s*type)\s*\*{0,2}\s*:?\s*(.*)$/i
+              );
+
+              if (metadata) {
+                const inlineValue = metadata[2].trim();
+
+                // Если значение находится на следующей строке,
+                // пропускаем её тоже
+                skipNextValue = !inlineValue;
                 continue;
               }
 
-              // Удаляем URL и Markdown-ссылки
+              // Пропускаем значение технического поля
+              if (skipNextValue) {
+                skipNextValue = false;
+                continue;
+              }
+
+              // Удаляем любые оставшиеся URL и Markdown-ссылки
               let cleaned = line
                 .replace(/\[([^\]]+)\]\(https?:\/\/[^)]+\)/g, "")
                 .replace(/https?:\/\/\S+/g, "")
@@ -82,10 +85,13 @@ jobs:
 
               if (cleaned) {
                 result.push(cleaned);
+              } else {
+                result.push("");
               }
             }
 
-            return result.join("\n")
+            return result
+              .join("\n")
               .replace(/\n{3,}/g, "\n\n")
               .trim() || "Описание обновления отсутствует.";
           }
@@ -97,6 +103,9 @@ jobs:
           const description = cleanDescription(
             process.env.RELEASE_BODY
           );
+
+          // Не передаём username, avatar_url или footer:
+          // Discord сохранит оригинальное имя и аватар Webhook.
 
           const payload = {
             embeds: [{
